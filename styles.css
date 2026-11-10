@@ -17,8 +17,8 @@ a{color:inherit}
 .up{color:var(--up)} .down{color:var(--down)}
 
 /* Header */
-.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px clamp(12px,3vw,32px);background:rgba(9,12,17,.85);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
-.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px clamp(12px,3vw,32px);padding-top:calc(16px + env(safe-area-inset-top));background:rgba(9,12,17,.85);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:14px;min-width:0}
 .brand svg{width:34px;height:34px;color:var(--accent);background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:5px;flex:none}
 .brand .curve{stroke-dasharray:60;stroke-dashoffset:60;animation:draw 1.4s .2s ease forwards}
 @keyframes draw{to{stroke-dashoffset:0}}
@@ -88,7 +88,7 @@ main{padding:10px clamp(12px,3vw,32px) 20px;display:grid;grid-template-columns:r
 
 /* Rows: one design that adapts to the width of its list */
 .list{container-type:inline-size}
-.tier .tbody{min-height:calc(var(--rowh) * 5)}
+.tier .tbody{min-height:0}
 .cols{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 12px 6px;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);border-bottom:1px solid var(--line);font-weight:600}
 .cols>div{white-space:nowrap;text-align:right}
 .cols .h-coin{text-align:left}
@@ -154,7 +154,7 @@ main{padding:10px clamp(12px,3vw,32px) 20px;display:grid;grid-template-columns:r
   .cols .rkh,.cols .h-w{display:block}
   .cols .rkh,.cols .h-coin{text-align:left}
   .row{padding:0 12px;min-height:58px}
-  .tier .tbody{min-height:290px}
+  .tier .tbody{min-height:0}
   .tempty{height:290px}
   .row>*{grid-area:auto}
   .rk{display:flex}
@@ -177,7 +177,7 @@ main{padding:10px clamp(12px,3vw,32px) 20px;display:grid;grid-template-columns:r
 .disclaimer{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--muted);line-height:1.5}
 .disclaimer b{color:var(--text)}
 .intro{padding:14px clamp(12px,3vw,32px) 4px}
-.intro .what{margin:0 0 4px;font-size:15px;font-weight:600;color:var(--text);letter-spacing:-.01em}
+.intro .what{margin:0 0 4px;font-size:16px;font-weight:700;color:#ffd166;letter-spacing:-.01em}
 .intro .note{margin:0;font-size:12px;color:var(--muted)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:8px;color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:6px}
@@ -297,7 +297,7 @@ main{padding:10px clamp(12px,3vw,32px) 20px;display:grid;grid-template-columns:r
 
 @media (max-width:1280px){ main{grid-template-columns:1fr} }
 @media (max-width:680px){
-  .top{padding:10px 12px}
+  .top{padding:14px 14px;padding-top:calc(14px + env(safe-area-inset-top))}
   .brand .tagline,.status .cnt{display:none}
   .brand svg{width:30px;height:30px}
   .brand .name{font-size:17px}

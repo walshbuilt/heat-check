@@ -161,8 +161,10 @@ const NOT_MEME = new Set([
 const NOT_MEME_NAME = /(xstock|tokenized|wrapped|bridged|\(wormhole\)|\(portal\)|staked sol|liquid stak|usd coin|tether|stablecoin|\bdollar\b|\byield\b|treasury|gold token|\bvault\b)/i;
 const NOT_MEME_SYM = /^(usd.*|.*usd|.*usdc|.*usdt|[a-z]{0,6}sol|w?btc|.*btc|w?eth|.*eth|eurc|pyusd|.*x)$/i;
 const LAUNCHPAD = /(pump|bonk|boop|bags|moon|daos)$/;
+const MAJOR_SYM = /^(near|avax|bnb|matic|pol|ada|dot|atom|link|uni|aave|arb|op|sui|apt|ton|trx|xrp|ltc|bch|fil|inj|tia|sei|algo|xlm|hbar|icp|etc|eos|ftm|mnt|strk|zk|ena|ondo|wld|fet|tao|ray|jup|orca|pyth|jto|drift|kmno|tnsr|zeus|cloud|me|io|w)$/i;
 export function isMeme(r) {
   if (LAUNCHPAD.test(r.a)) return true; // launched on a meme launchpad
+  if (MAJOR_SYM.test(r.s || '')) return false; // bridged majors and Solana DeFi/infra tokens
   if (NOT_MEME.has(r.a) || QUOTE_MINTS.has(r.a)) return false;
   if (NOT_MEME_NAME.test(r.nm || '')) return false;
   if (NOT_MEME_SYM.test(r.s || '') && /(stak|wrap|bridge|stock|usd|bitcoin|ether|sol\b|liquid)/i.test(r.nm || '')) return false;
