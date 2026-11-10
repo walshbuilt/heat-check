@@ -179,26 +179,28 @@ function gradeOf(t) {
 }
 const topWhy = (t) => { const f = allFlags(t).filter((x) => x.l > 1).sort((a, b) => b.l - a.l)[0]; return f ? SHORT[f.k] || f.t : ''; };
 const GRADE_TXT = { green: 'Clean', amber: 'Caution', red: 'Red flag' };
-// Organic mode: real traders only. No bots, no insider rings, dev holds little or nothing, mint and
-// freeze revoked, LP locked/burned where RugCheck knows it. Insider/LP data arrives per coin from
-// RugCheck; a coin stays listed while its check is loading and drops out if the check fails it.
+// Organic mode: real traders only, and already Clean (no caution flags). No bot signals, Jupiter
+// organic score healthy, dev holds under 3%, mint and freeze revoked, and RugCheck has confirmed no
+// insider ring and LP locked/burned. A coin is not Organic until its RugCheck report is in.
 const BOT_FLAGS = new Set(['wash', 'fewtx', 'whale', 'inorganic', 'boost']);
-function isOrganic(t) {
-  if (gradeOf(t) === 'red') return false;
+function organicPre(t) {
+  if (gradeOf(t) !== 'green') return false;
   if (t.f.some((x) => BOT_FLAGS.has(x.k))) return false;
   if (t.ol === 'low') return false;
   if (t.os != null && t.os < 50) return false;
   if (t.dev != null && t.dev >= 3) return false;
   if (t.aud && (!t.mintOff || !t.frzOff)) return false;
-  const p = MH.parts(t, gradeOf(t));
-  if (p.bot || p.botChurn || p.organic < 0.35) return false;
+  const p = MH.parts(t, 'green');
+  return !(p.bot || p.botChurn || p.organic < 0.35);
+}
+function isOrganic(t) {
+  if (!organicPre(t)) return false;
   const r = S.risk.get(t.a);
-  if (r && !r.pending && !r.failed) {
-    if (r.ins != null && r.ins >= 5) return false;
-    if (r.insN != null && r.insN >= 3) return false;
-    if (r.lp != null && r.lp < 50) return false;
-    if (r.rugged) return false;
-  }
+  if (!r || r.pending || r.failed) return false;
+  if (r.ins != null && r.ins >= 5) return false;
+  if (r.insN != null && r.insN >= 3) return false;
+  if (r.lp != null && r.lp < 50) return false;
+  if (r.cre != null && r.cre >= 3) return false;
   return true;
 }
 
@@ -258,7 +260,7 @@ function queueRisk() {
   for (const id of S.order) if (!S.hidden.has(id)) vis.push(...(groups.get(id) || []).slice(0, CARD_ROWS));
   if (S.openTier) vis.push(...(groups.get(S.openTier) || []).slice(0, 30));
   // Organic mode needs the insider/LP check for every candidate, not just the rows on screen.
-  if (S.safety === 'organic') for (const t of S.tokens.values()) if (isOrganic(t)) vis.push(t);
+  if (S.safety === 'organic') for (const t of S.tokens.values()) if (organicPre(t)) vis.push(t);
   vis.forEach((t) => { if (!S.risk.has(t.a) && !riskQ.includes(t.a)) riskQ.push(t.a); });
   pumpRisk();
 }
@@ -276,7 +278,7 @@ function pumpRisk() {
 }
 function updateRiskUI(a) {
   const t = S.tokens.get(a);
-  if (S.safety === 'organic' && t && !isOrganic(t)) { render(); renderTape(); return; }
+  if (S.safety === 'organic' && t) { render(); renderTape(); return; }
   if (t) rowEls.forEach((el, k) => { if (k.endsWith('|' + a)) paintSafety(el, t); });
   if (openMint === a) paintDrawer();
 }
@@ -332,12 +334,13 @@ function buildRow(t) {
 function paintSafety(el, t) {
   const g = gradeOf(t);
   const sf = el.querySelector('.sf');
-  sf.className = 'sf ' + g;
-  sf.querySelector('.sft').textContent = GRADE_TXT[g];
+  const org = g === 'green' && isOrganic(t);
+  sf.className = 'sf ' + g + (org ? ' organic' : '');
+  sf.querySelector('.sft').innerHTML = org ? 'Clean<i class="od"></i><span class="org">Organic</span>' : GRADE_TXT[g];
   const why = g === 'green' ? '' : topWhy(t);
   sf.querySelector('.why').textContent = why ? '· ' + why : '';
   const f = allFlags(t).filter((x) => x.l > 1).map((x) => x.t);
-  el.title = f.length ? `${GRADE_TXT[g]}: ${f.join(' · ')}` : 'No automated red flags';
+  el.title = f.length ? `${GRADE_TXT[g]}: ${f.join(' · ')}` : org ? 'Clean & Organic: real traders, no bots, no insider ring, dev holds under 3%, mint/freeze revoked, LP locked or burned' : 'No automated red flags';
   el.classList.toggle('red', g === 'red');
   el.classList.remove('g-red', 'g-amber', 'g-green'); el.classList.add('g-' + g);
 }

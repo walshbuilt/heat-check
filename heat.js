@@ -2,7 +2,7 @@
  *
  * Five equal-minded pillars, then hard safety gates:
  *
- *   price    28  live price ladder: 30s, 1m, 2m, 3m, 4m, 5m (sampled in the browser every few
+ *   price    32  live price ladder: 30s, 1m, 2m, 3m, 4m, 5m (sampled in the browser every few
  *                seconds) plus 1h / 6h / 24h trend, how many windows are green, and whether the
  *                move is accelerating (last 5 min faster than the hour's pace).
  *   buying   22  net buyers vs sellers: buy share of volume, net new buyers per trader, and whether
@@ -18,7 +18,7 @@
  */
 (function () {
   'use strict';
-  var W = { price: 28, buying: 22, organic: 20, volume: 15, clean: 15 };
+  var W = { price: 32, buying: 22, organic: 16, volume: 18, clean: 12 };
   var SOCIAL = 6;
   var SIG_MC = 75e3;
 
@@ -86,7 +86,10 @@
     var accel = 0;
     if (g5 > 0) accel = h1 > 1 ? clamp01(((g5 / 5) / (h1 / 60) - 1) / 3) : sat(g5, 8);
     var falling = Math.min(g30 == null ? 0 : g30, g1 == null ? 0 : g1, g2 == null ? 0 : g2, m5);
-    var price = clamp01(0.5 * short + 0.2 * trend * (falling < -4 ? 0.4 : 1) + 0.15 * ladder + 0.15 * accel);
+    // A 24h/1h run only keeps its trend credit while the coin is still moving right now. Cooling off
+    // (no short-term push, ticking down) cuts it hard; still surging keeps it in full.
+    var sustain = short >= 0.3 ? 1 : falling < -2 ? 0.3 : short >= 0.12 ? 0.7 : 0.5;
+    var price = clamp01(0.6 * short + 0.1 * trend * sustain + 0.1 * ladder + 0.2 * accel);
 
     // ================= NET BUYING =================
     var bs = t.bs || {};
@@ -141,7 +144,8 @@
     [fresh(so.b, 15, 60, 180), fresh(so.p, 15, 60, 180), fresh(so.c, 30, 120, 360), fresh(so.tg, 10, 30, 120)].forEach(function (x) { if (x) { hits++; social = Math.max(social, x); } });
     if (hits > 1) social = Math.min(1, social + 0.2 * (hits - 1));
 
-    var faded = (h1 > 80 || h24 > 300) && short < 0.1 && falling < -3;
+    var faded = (h1 > 60 || h24 > 200) && short < 0.15 && falling < -2;
+    var cooling = (h1 > 40 || h24 > 100) && short < 0.1 && !faded;
     var h24tx = tx.h24 || {};
     var bot = botChurn || ((h24tx.b || 0) > 3000 && (h24tx.b || 0) / ((h24tx.s || 0) + 1) > 8);
     var dead = (v.m5 || 0) < 250 || n5 < 4;
@@ -152,7 +156,7 @@
       buying: buying, s5: s5, sH: sH, nbRatio: nbRatio, buyAccel: buyAccel,
       organic: organic, trPace: trPace, tr5: tr5, hc: hc, spread: spread, os: t.os, ol: t.ol, ageH: ageH, botChurn: botChurn,
       volume: volume, ratio: ratio, clean: clean, ins: ins, insN: rk && rk.insN, top: top, topBad: topBad, checked: !!rk,
-      social: social, faded: faded, bot: bot, dead: dead, stale: !!(mf && mf.stale), dumping: dumping,
+      social: social, faded: faded, cooling: cooling, bot: bot, dead: dead, stale: !!(mf && mf.stale), dumping: dumping,
       size: sizeF(mc), mc: mc, n5: n5, mf: mf, live: g30 != null || g1 != null, grade: grade };
   }
 
@@ -176,7 +180,8 @@
     if (p.top != null && p.mc < 100e6 && p.top >= p.topBad) s *= 0.5;
     if (p.grade === 'red') s *= 0.45;
     if (p.bot) s *= 0.4;
-    if (p.faded) s *= 0.6;
+    if (p.faded) s *= 0.5;
+    if (p.cooling) s *= 0.75;
     if (p.dumping) s *= 0.55;
     if (p.dead) s *= 0.45;
     if (p.stale) s *= 0.4;
@@ -244,6 +249,7 @@
     if (p.size < 1) notes.push('Small market cap: score scaled to ' + Math.round(p.size * 100) + '%.');
     if (p.faded) notes.push('Ran earlier but fading now. Score cut 40%.');
     if (p.dumping) notes.push('Selling is winning right now. Score cut 45%.');
+    if (p.cooling) notes.push('Ran earlier but not moving now. Score cut 25% until it surges again.');
     if (p.dead) notes.push('Very few trades in the last 5 minutes.');
     if (grade === 'red') notes.push('Red safety flags. Score cut 55%.');
     notes.push(p.live ? 'Live price checks every few seconds.' : 'Live 30s–4m price checks start once the coin has been on screen briefly.');
