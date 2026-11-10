@@ -1,0 +1,13 @@
+{
+  "name": "Heat Check",
+  "short_name": "Heat Check",
+  "description": "Live Solana meme coin heat index",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090c11",
+  "theme_color": "#090c11",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
