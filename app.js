@@ -179,6 +179,28 @@ function gradeOf(t) {
 }
 const topWhy = (t) => { const f = allFlags(t).filter((x) => x.l > 1).sort((a, b) => b.l - a.l)[0]; return f ? SHORT[f.k] || f.t : ''; };
 const GRADE_TXT = { green: 'Clean', amber: 'Caution', red: 'Red flag' };
+// Organic mode: real traders only. No bots, no insider rings, dev holds little or nothing, mint and
+// freeze revoked, LP locked/burned where RugCheck knows it. Insider/LP data arrives per coin from
+// RugCheck; a coin stays listed while its check is loading and drops out if the check fails it.
+const BOT_FLAGS = new Set(['wash', 'fewtx', 'whale', 'inorganic', 'boost']);
+function isOrganic(t) {
+  if (gradeOf(t) === 'red') return false;
+  if (t.f.some((x) => BOT_FLAGS.has(x.k))) return false;
+  if (t.ol === 'low') return false;
+  if (t.os != null && t.os < 50) return false;
+  if (t.dev != null && t.dev >= 3) return false;
+  if (t.aud && (!t.mintOff || !t.frzOff)) return false;
+  const p = MH.parts(t, gradeOf(t));
+  if (p.bot || p.botChurn || p.organic < 0.35) return false;
+  const r = S.risk.get(t.a);
+  if (r && !r.pending && !r.failed) {
+    if (r.ins != null && r.ins >= 5) return false;
+    if (r.insN != null && r.insN >= 3) return false;
+    if (r.lp != null && r.lp < 50) return false;
+    if (r.rugged) return false;
+  }
+  return true;
+}
 
 // ---------- Data ----------
 async function api(path) {
@@ -235,6 +257,8 @@ function queueRisk() {
   const vis = [];
   for (const id of S.order) if (!S.hidden.has(id)) vis.push(...(groups.get(id) || []).slice(0, CARD_ROWS));
   if (S.openTier) vis.push(...(groups.get(S.openTier) || []).slice(0, 30));
+  // Organic mode needs the insider/LP check for every candidate, not just the rows on screen.
+  if (S.safety === 'organic') for (const t of S.tokens.values()) if (isOrganic(t)) vis.push(t);
   vis.forEach((t) => { if (!S.risk.has(t.a) && !riskQ.includes(t.a)) riskQ.push(t.a); });
   pumpRisk();
 }
@@ -252,6 +276,7 @@ function pumpRisk() {
 }
 function updateRiskUI(a) {
   const t = S.tokens.get(a);
+  if (S.safety === 'organic' && t && !isOrganic(t)) { render(); renderTape(); return; }
   if (t) rowEls.forEach((el, k) => { if (k.endsWith('|' + a)) paintSafety(el, t); });
   if (openMint === a) paintDrawer();
 }
@@ -363,6 +388,7 @@ function visibleTokens() {
     const g = gradeOf(t);
     if (S.safety === 'nored' && g === 'red') continue;
     if (S.safety === 'clean' && g !== 'green') continue;
+    if (S.safety === 'organic' && !isOrganic(t)) continue;
     out.push(t);
   }
   return out;
@@ -515,7 +541,7 @@ function segInit(sel, key, attr, after) {
 }
 const resetRank = () => { S.prevRank = new Map(); rowEls.forEach((el) => { el._r = null; }); };
 segInit('#sortSeg', 'sort', 'o', () => { resetRank(); render(); renderTape(); });
-segInit('#safetySeg', 'safety', 's', () => { render(); renderTape(); });
+segInit('#safetySeg', 'safety', 's', () => { render(); renderTape(); queueRisk(); });
 let qT;
 $('#q').addEventListener('input', (e) => { clearTimeout(qT); qT = setTimeout(() => { S.q = e.target.value; render(); }, 120); });
 
