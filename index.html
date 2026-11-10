@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Heat Check — live Solana meme coin heat</title>
+<meta name="description" content="Heat Check: live Solana meme coins by market cap tier: price action, volume, age, all-time high and red flags — from the trenches to $1B+.">
+<meta name="theme-color" content="#090c11">
+<link rel="icon" type="image/png" href="/heatcheck-icon.png">
+<link rel="apple-touch-icon" href="/heatcheck-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/theme.css">
+<style>.brand .logo{height:40px;width:auto;display:block;flex:none}.brand .tagline{padding-left:10px;border-left:1px solid var(--hair2)}.top::after{background:linear-gradient(90deg,transparent,rgba(255,122,48,.55) 30%,rgba(255,255,255,.35) 50%,rgba(255,122,48,.55) 70%,transparent)}@media (max-width:700px){.brand .logo{height:32px}}</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <img class="logo" src="/heatcheck.webp" width="116" height="40" alt="Heat Check">
+    <div class="tagline">Live Solana memes · trenches to $1B+</div>
+  </div>
+  <div class="hright">
+    <div class="status" id="status"><span class="dot"></span><span id="statusText">Connecting…</span></div>
+    <button class="icon" id="customizeBtn" aria-label="Arrange tiers" title="Arrange tiers"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h6"/></svg></button>
+  </div>
+</header>
+
+<div class="tape" id="tape" aria-label="Hottest coins right now"><div class="track" id="hotTrack"></div></div>
+<div id="track" hidden></div>
+
+<div class="controls" id="controls">
+  <div class="ctlrow">
+  <div class="ctl"><span class="clabel">Rank</span>
+    <div class="seg" id="sortSeg"><button data-o="heat"><span class="lg">Heat score</span><span class="sm">Heat</span></button><button data-o="g24"><span class="lg">24h gain</span><span class="sm">24h</span></button><button data-o="g1"><span class="lg">1h gain</span><span class="sm">1h</span></button><button data-o="mc"><span class="lg">Market cap</span><span class="sm">MC</span></button></div>
+  </div>
+  <div class="ctl"><span class="clabel">Safety</span>
+    <div class="seg" id="safetySeg"><button data-s="all" class="s-all"><span class="lg">All Coins</span><span class="sm">All</span></button><button data-s="nored" class="s-nored"><span class="lg">Hide Red Flags</span><span class="sm">No Red Flags</span></button><button data-s="clean" class="s-clean"><span class="lg">Clean Only</span><span class="sm">Clean</span></button></div>
+  </div>
+  </div>
+  <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" enterkeyhint="search" placeholder="Search coin or paste contract" autocomplete="off" spellcheck="false"><button type="button" class="qx" id="qClear" hidden aria-label="Clear search"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></label>
+</div>
+<p class="explain" id="explain" hidden></p>
+<p class="explain"><b>Heat</b> catches coins as they rip: price jumps over the last 30 seconds, 1 minute and 5 minutes count most, backed by volume, new traders and buyers.</p>
+<nav class="jump" id="jump" aria-label="Jump to tier"></nav>
+
+<main id="tiers" aria-live="polite"></main>
+<div class="empty" id="loading"><div class="spinner"></div>Scanning Solana for live trading…</div>
+
+<footer class="foot">
+  <div class="legend"><span><i class="lg g"></i>Clean</span><span><i class="lg a"></i>Caution</span><span><i class="lg r"></i>Red flag</span><span class="muted">Tap any coin for chart, all-time high, origin and full safety details.</span></div>
+  Data: DexScreener, GeckoTerminal, RugCheck, Jupiter, pump.fun. Charts by <a href="https://www.tradingview.com" target="_blank" rel="noopener">TradingView</a> Lightweight Charts. Red flags are automated signals, not guarantees. Not financial advice.
+</footer>
+
+<!-- Full tier sheet -->
+<div class="scrim" id="scrim"></div>
+<aside class="sheet" id="sheet" aria-hidden="true">
+  <div class="shead">
+    <button class="icon" id="closeSheet" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <div><div id="sTitle" class="stitle"></div><div id="sSub" class="muted small"></div></div>
+  </div>
+  <div class="sbody"><div class="list" id="sList"><div class="cols" id="sCols"></div><div class="tbody" id="sBody"></div></div></div>
+</aside>
+
+<!-- Coin page -->
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dhead">
+    <button class="icon" id="closeDrawer" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <span class="davw"><img id="dImg" alt=""><i class="fdot" id="dDot"></i></span>
+    <div class="dtitle"><div class="dl1"><span id="dSym"></span><span id="dPrice"></span></div><div id="dName" class="muted"></div></div>
+    <div class="dmc"><span class="mclbl">Market cap</span><b id="dMc"></b><span id="dChg"></span></div>
+  </div>
+  <div class="dbody">
+    <div class="keys" id="dKeys"></div>
+    <div class="chips" id="dChips"></div>
+    <div class="charthead">
+      <div class="seg small" id="unitSeg"><button data-u="mc">Market cap</button><button data-u="price">Price</button></div>
+      <div class="seg small" id="tfSeg"><button data-tf="1m">1m</button><button data-tf="5m">5m</button><button data-tf="15m">15m</button><button data-tf="1h">1h</button><button data-tf="4h">4h</button><button data-tf="1d">1D</button></div>
+      <button class="tool" id="fsBtn" title="Full screen" aria-label="Full screen"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    </div>
+    <div class="chartwrap" id="chartWrap">
+      <div id="chart"></div>
+      <div class="livetag" id="liveTag"><span class="dot"></span>LIVE</div>
+      <button class="tool exitfs" id="exitFs" aria-label="Exit full screen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      <div class="chartmsg" id="chartMsg" hidden></div>
+    </div>
+    <section class="card heatcard" id="dHeat"></section>
+    <section class="card" id="dSafety"></section>
+    <section class="card" id="dAbout"></section>
+    <section class="card" id="dTraction"></section>
+    <div class="grid" id="dStats"></div>
+    <div class="links" id="dLinks"></div>
+  </div>
+</aside>
+
+<!-- Arrange tiers -->
+<div class="modal" id="modal" hidden>
+  <div class="mcard">
+    <div class="mhead"><h3>Arrange tiers</h3><button class="icon" id="closeModal" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <p class="muted">Turn tiers on or off and set their order. You can also drag a tier card by its handle.</p>
+    <ul id="tierList"></ul>
+    <div class="mfoot"><button class="ghost" id="resetTiers">Reset</button><button class="primary" id="doneTiers">Done</button></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/net.js"></script>
+<script src="/theme.js"></script>
+<script src="/chart-legend.js"></script>
+<script src="/heat.js"></script>
+<script src="/about.js"></script>
+<script src="/app.js"></script>
+<script src="/ui.js"></script>
+</body>
+</html>
