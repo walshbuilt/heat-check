@@ -172,6 +172,12 @@ main{padding:10px clamp(12px,3vw,32px) 20px;display:grid;grid-template-columns:r
 .spinner{width:18px;height:18px;border:2px solid var(--line2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .foot{padding:6px clamp(12px,3vw,32px) 40px;color:var(--dim);font-size:12px}
+.foot p{margin:0 0 8px}
+.disclaimer{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--muted);line-height:1.5}
+.disclaimer b{color:var(--text)}
+.intro{padding:14px clamp(12px,3vw,32px) 4px}
+.intro .what{margin:0 0 4px;font-size:15px;font-weight:600;color:var(--text);letter-spacing:-.01em}
+.intro .note{margin:0;font-size:12px;color:var(--muted)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:8px;color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .foot a{color:var(--muted)}
