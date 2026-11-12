@@ -445,7 +445,7 @@ function render() {
   if (!dragging) wanted.forEach((id, i) => { const el = tierEls.get(id); if (main.children[i] !== el) main.insertBefore(el, main.children[i] || null); });
   else wanted.forEach((id) => { const el = tierEls.get(id); if (!el.isConnected) main.appendChild(el); });
 
-  setHTML($('#jump'), wanted.map((id) => `<button data-j="${id}">${TMAP[id].label}<span>${groups.get(id).length}</span></button>`).join(''));
+  setHTML($('#jump'), `<button data-j="ignite" class="jig">Top 10<span>${window.__igN || 0}</span></button>` + wanted.map((id) => `<button data-j="${id}">${TMAP[id].label}<span>${groups.get(id).length}</span></button>`).join(''));
   const used = new Set();
   const cols = colsHTML();
   for (const id of wanted) {
@@ -507,7 +507,7 @@ function renderTape() {
   track.style.setProperty('--dur', Math.max(30, items.length * 5) + 's');
   track.querySelectorAll('img').forEach((im) => im.addEventListener('error', () => im.remove(), { once: true }));
 }
-$('#jump').addEventListener('click', (e) => { const b = e.target.closest('[data-j]'); if (b) tierEls.get(b.dataset.j)?.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' }); });
+$('#jump').addEventListener('click', (e) => { const b = e.target.closest('[data-j]'); if (b) (b.dataset.j === 'ignite' ? $('#ignite') : tierEls.get(b.dataset.j))?.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' }); });
 $('#track').addEventListener('click', (e) => { const b = e.target.closest('.ti'); if (b) openToken(b.dataset.a); });
 
 function bindDrag(sec) {
@@ -584,19 +584,38 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('on');
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), 1800);
 }
-// Phones (and in-app browsers) often block new tabs, so open outside links in the same tab there.
-// The coin stays in the URL, so Back returns right to it.
+// Outside links open in a separate browser window so Heat Check stays put. This matters most for the
+// home-screen app: loading DexScreener etc. in the same window replaced the app with no way back.
+// Only if the browser blocks the new window (some in-app browsers) do we fall back to the same tab.
+const STANDALONE = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 document.addEventListener('click', (e) => {
   const l = e.target.closest('a[href^="http"]');
-  if (!l || !matchMedia('(pointer: coarse)').matches) return;
+  if (!l) return;
   e.preventDefault();
-  location.href = l.href;
+  const w = window.open(l.href, '_blank');
+  if (w) { try { w.opener = null; } catch {} return; }
+  if (!STANDALONE) location.href = l.href;
+  else toast('Allow pop-ups to open links');
 });
+// Copy that works everywhere: the clipboard API when allowed, else the old select-and-copy way.
+function copyText(v) {
+  const legacy = () => {
+    const ta = document.createElement('textarea');
+    ta.value = v; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
+    document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, v.length);
+    let ok = false; try { ok = document.execCommand('copy'); } catch {}
+    ta.remove();
+    if (!ok) throw new Error('copy failed');
+  };
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(v).catch(() => legacy());
+  return new Promise((ok) => { legacy(); ok(); });
+}
 document.addEventListener('click', (e) => {
   const c = e.target.closest('[data-copy]');
   if (!c) return;
+  e.preventDefault();
   const v = c.dataset.copy;
-  navigator.clipboard?.writeText(v).then(() => toast('Copied ' + short(v)), () => toast(v));
+  copyText(v).then(() => toast('Copied ' + short(v)), () => toast(v));
 });
 
 // ---------- Routing ----------
@@ -1120,6 +1139,7 @@ function igTick() {
   }
   rows.sort((x, y) => y[1].r.s - x[1].r.s);
   IG.listed = rows.slice(0, 10);
+  window.__igN = IG.listed.length;
   let dirty = false;
   for (const [t, sn] of IG.listed) {
     sn.listed = true;
