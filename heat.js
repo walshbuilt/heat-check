@@ -20,7 +20,7 @@
   'use strict';
   var W = { price: 32, buying: 22, organic: 16, volume: 18, clean: 12 };
   var SOCIAL = 6;
-  var SIG_MC = 75e3;
+  var SIG_MC = 40e3;
 
   var clamp01 = function (x) { return x > 1 ? 1 : x > 0 ? x : 0; };
   var sat = function (x, ref) { return 1 - Math.exp(-Math.max(0, x || 0) / ref); };
@@ -63,7 +63,8 @@
 
   var SEEN = new Map();        // latest copy of every coin scored (the ticker reads this)
   function riskOf(t) { var r = window.HCRisk && window.HCRisk.get(t.a); return r || null; }
-  function sizeF(mc) { return mc >= 250e3 ? 1 : mc >= 100e3 ? 0.9 : mc >= 50e3 ? 0.72 : mc >= 20e3 ? 0.5 : mc >= 10e3 ? 0.35 : 0.22; }
+  // $40K–$120K is the early-runner zone, so it scores at full size.
+  function sizeF(mc) { return mc >= 250e3 ? 1 : mc > 120e3 ? 0.95 : mc >= 40e3 ? 1 : mc >= 20e3 ? 0.6 : mc >= 10e3 ? 0.35 : 0.22; }
 
   function parts(t, grade) {
     var mc = t.mc || 1, v = t.v || {}, c = t.c || {}, tx = t.tx || {}, mf = minOf(t);
@@ -150,13 +151,20 @@
     var bot = botChurn || ((h24tx.b || 0) > 3000 && (h24tx.b || 0) / ((h24tx.s || 0) + 1) > 8);
     var dead = (v.m5 || 0) < 250 || n5 < 4;
     var dumping = falling < -8 || (s5 != null && s5 < 0.35 && m5 < -3);
+    // Run history (loaded for the coins worth a closer look). A coin that already had a 4x+ move and
+    // sits well under that high only counts as recovering once the bottom is confirmed: a higher low
+    // over the last 6 hours, 30%+ off the 3-day floor and green on the hour and 6 hours.
+    var rr = window.HCRun && window.HCRun.get(t.a);
+    var hist = !!(rr && rr.n);
+    var ranBefore = hist && rr.preRun >= 4 && !(rr.preHi && t.p >= rr.preHi * 0.85);
+    var bottomIn = hist && rr.lo6 && rr.lo72 && rr.lo6 >= rr.lo72 * 1.08 && t.p >= rr.lo72 * 1.3 && h1 >= 10 && h6 >= 0;
 
     return { price: price, short: short, trend: trend, ladder: ladder, accel: accel, g30: g30, g1: g1, g2: g2, g3: g3, g4: g4, g5: g5,
       h1: h1, h6: h6, h24: h24, falling: falling,
       buying: buying, s5: s5, sH: sH, nbRatio: nbRatio, buyAccel: buyAccel,
       organic: organic, trPace: trPace, tr5: tr5, hc: hc, spread: spread, os: t.os, ol: t.ol, ageH: ageH, botChurn: botChurn,
       volume: volume, ratio: ratio, clean: clean, ins: ins, insN: rk && rk.insN, top: top, topBad: topBad, checked: !!rk,
-      social: social, faded: faded, cooling: cooling, bot: bot, dead: dead, stale: !!(mf && mf.stale), dumping: dumping,
+      social: social, faded: faded, cooling: cooling, bot: bot, dead: dead, hist: hist, ranBefore: ranBefore, bottomIn: bottomIn, stale: !!(mf && mf.stale), dumping: dumping,
       size: sizeF(mc), mc: mc, n5: n5, mf: mf, live: g30 != null || g1 != null, grade: grade };
   }
 
@@ -182,6 +190,7 @@
     if (p.bot) s *= 0.4;
     if (p.faded) s *= 0.5;
     if (p.cooling) s *= 0.75;
+    if (p.ranBefore && !p.bottomIn) s *= 0.7;
     if (p.dumping) s *= 0.55;
     if (p.dead) s *= 0.45;
     if (p.stale) s *= 0.4;
@@ -203,7 +212,7 @@
     if (!big || !ok) return { k: '', l: '' };
     if (p.short >= 0.55 && p.buying >= 0.5 && p.organic >= 0.35) return { k: 'ign', l: 'Igniting' };
     if (p.trend >= 0.4 && p.short >= 0.15 && p.buying >= 0.45) return { k: 'run', l: 'Running' };
-    if (p.h6 < -20 && p.short >= 0.3 && p.buying >= 0.5) return { k: 'rec', l: 'Recovering' };
+    if (p.h6 < -20 && p.short >= 0.3 && p.buying >= 0.5 && p.h1 >= 5 && (!p.hist || p.bottomIn)) return { k: 'rec', l: 'Recovering' };
     return { k: '', l: '' };
   }
 
@@ -250,6 +259,7 @@
     if (p.faded) notes.push('Ran earlier but fading now. Score cut 40%.');
     if (p.dumping) notes.push('Selling is winning right now. Score cut 45%.');
     if (p.cooling) notes.push('Ran earlier but not moving now. Score cut 25% until it surges again.');
+    if (p.ranBefore && !p.bottomIn) notes.push('Already had a big run and the bottom isn\'t confirmed yet. Score cut 30%.');
     if (p.dead) notes.push('Very few trades in the last 5 minutes.');
     if (grade === 'red') notes.push('Red safety flags. Score cut 55%.');
     notes.push(p.live ? 'Live price checks every few seconds.' : 'Live 30s–4m price checks start once the coin has been on screen briefly.');

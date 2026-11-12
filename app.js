@@ -25,6 +25,7 @@ const TIERS = [
 ];
 const TMAP = Object.fromEntries(TIERS.map((t) => [t.id, t]));
 const WIN_LABEL = { m5: '5m', h1: '1h', h6: '6h', h24: '24h' };
+const RANK_MS = 10000, IG_MS = 10000;
 const SCAN_MS = 12000, PRICE_MS = 3000, TOKEN_MS = 2000, CANDLE_MS = 15000;
 const CARD_ROWS = 5, SHEET_ROWS = 500;
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -428,7 +429,12 @@ function render() {
   explain();
   groups = new Map(TIERS.map((t) => [t.id, []]));
   for (const t of visibleTokens()) groups.get(tierOf(t.mc)).push(t);
-  for (const arr of groups.values()) arr.sort((a, b) => sortKey(b) - sortKey(a));
+  // Re-rank at most every 10 seconds so rows hold still long enough to tap. Prices and numbers
+  // still update live in place; only the order waits. New coins slot in by score.
+  const reRank = !S.rankAt || Date.now() - S.rankAt >= RANK_MS;
+  const prevPos = (t) => S.prevRank.get(t.a)?.rank ?? 1e9;
+  for (const arr of groups.values()) arr.sort(reRank ? (a, b) => sortKey(b) - sortKey(a) : (a, b) => prevPos(a) - prevPos(b) || sortKey(b) - sortKey(a));
+  if (reRank) S.rankAt = Date.now();
 
   const first = new Map();
   rowEls.forEach((el, k) => { if (el.isConnected) first.set(k, el.getBoundingClientRect().top); });
@@ -542,7 +548,7 @@ function segInit(sel, key, attr, after) {
   paint();
   return paint;
 }
-const resetRank = () => { S.prevRank = new Map(); rowEls.forEach((el) => { el._r = null; }); };
+const resetRank = () => { S.rankAt = 0; S.prevRank = new Map(); rowEls.forEach((el) => { el._r = null; }); };
 segInit('#sortSeg', 'sort', 'o', () => { resetRank(); render(); renderTape(); });
 segInit('#safetySeg', 'safety', 's', () => { render(); renderTape(); queueRisk(); });
 let qT;
@@ -978,6 +984,185 @@ const paintTf = segInit('#tfSeg', 'tf', 'tf', () => { tfManual = true; chartPool
 segInit('#unitSeg', 'unit', 'u', () => { if (chart) { setChartData(); centerChart(); } });
 $('#fsBtn').onclick = () => setFull(!$('#chartWrap').classList.contains('full'));
 $('#exitFs').onclick = () => setFull(false);
+
+// ---------- Igniting Top 10 ----------
+// The strict list: coins moving right now that are as clean and spread out as we can verify, weighted
+// toward the $40K–$120K zone and toward a coin's FIRST run. Coins that already ran only make it as a
+// confirmed rebound (higher low, back above the floor, buyers in control) or a breakout over old highs.
+// Every coin needs a full RugCheck report, run history and a real description before it can list.
+const IG = { run: new Map(), seen: new Map(), log: igLoad(), at: 0, fetching: 0, scanned: 0, listed: [] };
+window.HCRun = IG.run;
+function igLoad() { try { const o = JSON.parse(localStorage.getItem('hc_ig') || '{}'); const cut = Date.now() - 48 * 3600e3; for (const k in o) if (!(o[k].t0 > cut)) delete o[k]; return o; } catch { return {}; } }
+function igSave() { try { localStorage.setItem('hc_ig', JSON.stringify(IG.log)); } catch {} }
+const clamp01 = (x) => (x > 1 ? 1 : x > 0 ? x : 0);
+// Market-cap sweet spot: $40K–$120K gets the biggest boost; big caps need much more to rank.
+const igZone = (mc) => (mc < 25e3 ? 0 : mc < 40e3 ? 0.9 : mc <= 120e3 ? 1.25 : mc <= 300e3 ? 1.05 : mc <= 1e6 ? 0.9 : mc <= 5e6 ? 0.72 : 0.55);
+const IG_PH = { first: 'First run', brk: 'Breakout', reb: 'Confirmed rebound', ext: 'Extended' };
+
+function igPhase(t, p, r) {
+  if (!r || r.pending || r.failed || !r.n) return null;
+  const fromLo = r.lo72 ? t.p / r.lo72 : 1;
+  if (!(r.preRun >= 4)) {
+    // Hasn't had a big move before this one. Already 8x off the floor or +600% on the day = late.
+    if (fromLo >= 8 || (p.h24 || 0) >= 600) return { k: 'ext', m: 0.55 };
+    return { k: 'first', m: fromLo <= 3 ? 1.25 : 1.05 };
+  }
+  // Already ran once. Reclaiming the old highs with strong buying counts as a breakout.
+  if (r.preHi && t.p >= r.preHi * 0.85) return p.short >= 0.4 && p.buying >= 0.55 ? { k: 'brk', m: 0.85 } : { k: 'no', m: 0 };
+  // Otherwise it's a rebound and has to prove the bottom is in: a higher low over the last 6 hours,
+  // 30%+ off the 3-day floor, green on the hour and 6 hours, pushing now with net buyers.
+  const higherLow = r.lo6 && r.lo72 && r.lo6 >= r.lo72 * 1.08;
+  const conf = higherLow && fromLo >= 1.3 && (p.h1 || 0) >= 10 && (p.h6 || 0) >= 0 && p.short >= 0.4 && p.buying >= 0.55 && (t.nb?.h1 || 0) > 0;
+  return conf ? { k: 'reb', m: 0.7 } : { k: 'no', m: 0 };
+}
+// Cheap checks on data we already have. Returns the heat parts if the coin is worth a deeper look.
+function igPre(t) {
+  if (!(t.mc >= 25e3) || !t.p) return null;
+  if (gradeOf(t) !== 'green') return null;
+  if (t.f.some((x) => BOT_FLAGS.has(x.k))) return null;
+  if (t.ol === 'low') return null;
+  if (t.dev != null && t.dev >= 3) return null;
+  if (t.aud && (!t.mintOff || !t.frzOff)) return null;
+  if (t.top != null && t.top >= 30) return null;
+  if (t.hold != null && t.hold < 150) return null;
+  const p = MH.parts(t, 'green');
+  if (p.dead || p.stale || p.dumping || p.bot || p.botChurn) return null;
+  if (p.short < 0.3 || p.buying < 0.5 || p.organic < 0.45) return null;
+  if ((t.v.m5 || 0) < Math.max(1500, t.mc * 0.006) || (p.tr5 || 0) < 12) return null;
+  const ageH = t.age ? (Date.now() - t.age) / 3600e3 : 99;
+  if (ageH > 2 && t.os != null && t.os < 55) return null;
+  return p;
+}
+const igMom = (p) => 0.4 * p.short + 0.15 * p.accel + 0.25 * p.buying + 0.2 * p.volume;
+// Full check. Returns { s, p, ph, rk, info } or a string saying what's still missing / failed.
+function igCheck(t, p) {
+  const rk = S.risk.get(t.a);
+  if (!rk || rk.pending) return 'wait';
+  if (rk.failed || rk.top10 == null) return 'norisk';
+  if (rk.top10 >= 20 || (rk.ins || 0) >= 5 || (rk.insN || 0) > 2 || (rk.cre || 0) >= 3) return 'conc';
+  if (rk.risks?.some((x) => /rugged/i.test(x.n))) return 'rug';
+  const curve = t.f.some((x) => x.k === 'curve');
+  if (!curve && rk.lp != null && rk.lp < 50) return 'lp';
+  const run = IG.run.get(t.a);
+  if (!run || run.pending) return 'wait';
+  const ph = igPhase(t, p, run);
+  if (!ph || !ph.m) return 'phase';
+  const info = S.info.get(t.a);
+  if (!info || info.pending) return 'wait';
+  const desc = String(info.desc || '').trim();
+  if (info.failed || desc.length < 20 || !(info.website || info.twitter)) return 'desc';
+  const conc = clamp01((20 - rk.top10) / 15);
+  const spread = 1 - Math.exp(-(info.holders || t.hold || 0) / 500);
+  const insF = 1 - Math.min(rk.ins || 0, 5) / 10;
+  const qual = 0.4 * p.organic + 0.25 * spread + 0.2 * conc + 0.15 * insF;
+  // Soft cap so the very best spread out instead of all reading 99.
+  const raw = 100 * igMom(p) * (0.55 + 0.45 * qual) * igZone(t.mc) * ph.m;
+  const s = 100 * (1 - Math.exp(-raw / 60));
+  return { s, p, ph, rk, info, desc };
+}
+// Run histories are fetched through a small queue (3 at a time) so every shortlisted coin is ready
+// by the next 10-second refresh without hammering the rate-limited chart source.
+const igQ = [];
+function igPump() {
+  while (IG.fetching < 3 && igQ.length) {
+    const a = igQ.shift(), t = S.tokens.get(a);
+    if (!t) continue;
+    const r = IG.run.get(a);
+    IG.fetching++;
+    IG.run.set(a, { ...(r || {}), pending: !(r && r.n), at: Date.now() });
+    api(`/api/runup?a=${a}&pool=${t.pair || ''}`)
+      .then((d) => IG.run.set(a, d.error ? { failed: true, at: Date.now() } : { ...d, at: Date.now() }))
+      .catch(() => IG.run.set(a, { failed: true, at: Date.now() - 180e3 }))
+      .finally(() => { IG.fetching--; igPump(); });
+  }
+}
+function igFetch(list) {
+  for (const t of list) {
+    if (!S.risk.has(t.a) && !riskQ.includes(t.a)) riskQ.unshift(t.a);
+    const r = IG.run.get(t.a);
+    const stale = !r || (!r.pending && Date.now() - r.at > 240e3);
+    if (stale && !igQ.includes(t.a)) igQ.push(t.a);
+    if (!S.info.has(t.a)) {
+      S.info.set(t.a, { pending: true });
+      api('/api/info?a=' + t.a).then((d) => S.info.set(t.a, d)).catch(() => S.info.set(t.a, { failed: true }));
+    }
+  }
+  igPump();
+  pumpRisk();
+}
+function igTick() {
+  const now = Date.now();
+  if (now - IG.at < IG_MS - 500) return;
+  IG.at = now;
+  const pre = [];
+  for (const t of S.tokens.values()) { const p = igPre(t); if (p) pre.push([t, p, igMom(p) * igZone(t.mc)]); }
+  pre.sort((a, b) => b[2] - a[2]);
+  const short = pre.slice(0, 16);
+  igFetch(short.map((x) => x[0]));
+  IG.scanned = S.tokens.size;
+  const ok = new Map();
+  for (const [t, p] of short) { const r = igCheck(t, p); if (typeof r === 'object') ok.set(t.a, r); }
+  // Steady list, refreshed every 10 seconds: a coin needs two passing checks in a row to list, and
+  // one missed check doesn't drop it, so the list doesn't flicker on a noisy tick.
+  const rows = [];
+  for (const [a, r] of ok) {
+    const sn = IG.seen.get(a) || { hits: 0 };
+    sn.hits++; sn.last = now; sn.r = r; IG.seen.set(a, sn);
+  }
+  for (const [a, sn] of IG.seen) {
+    if (!ok.has(a)) { sn.hits = Math.min(sn.hits, 1); if (now - sn.last > 25e3) { IG.seen.delete(a); continue; } }
+    const t = S.tokens.get(a);
+    if (!t || !(sn.hits >= 2 || (sn.listed && now - sn.last <= 25e3))) continue;
+    rows.push([t, sn]);
+  }
+  rows.sort((x, y) => y[1].r.s - x[1].r.s);
+  IG.listed = rows.slice(0, 10);
+  let dirty = false;
+  for (const [t, sn] of IG.listed) {
+    sn.listed = true;
+    const L = IG.log[t.a];
+    if (!L) { IG.log[t.a] = { p0: t.p, mc0: t.mc, t0: now, s: t.s, hi: t.p }; dirty = true; }
+    else if (t.p > L.hi) { L.hi = t.p; dirty = true; }
+  }
+  if (dirty) igSave();
+  paintIgnite();
+}
+function paintIgnite() {
+  const box = $('#igBody');
+  if (!box) return;
+  $('#igCount').textContent = IG.listed.length ? `${IG.listed.length} of 10` : '0 of 10';
+  if (!IG.listed.length) {
+    setHTML(box, `<div class="igempty"><b>Nothing passes the bar right now.</b><span>Watching ${IG.scanned} coins. A coin lists only when it's clean, spread out, has a real description and is moving early.</span></div>`);
+    return;
+  }
+  setHTML(box, IG.listed.map(([t, sn], i) => {
+    const r = sn.r, L = IG.log[t.a], img = safeUrl(t.img);
+    const av = img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="ph">${esc((t.s || '?').slice(0, 2))}</span>`;
+    const since = L && L.p0 ? (t.p / L.p0 - 1) * 100 : null;
+    const best = L && L.p0 ? (L.hi / L.p0 - 1) * 100 : null;
+    const hold = r.info.holders || t.hold;
+    const os = t.os != null ? `Organic ${t.os}` : '';
+    const chips = [`Top 10 hold ${Math.round(r.rk.top10)}%`, `Insiders ${(r.rk.ins || 0).toFixed(1)}%`, hold ? `${Math.round(hold).toLocaleString()} holders` : '', os].filter(Boolean);
+    return `<button class="igrow" data-a="${esc(t.a)}">
+      <span class="igrk">${i + 1}</span>
+      <span class="igav">${av}</span>
+      <span class="igmain">
+        <span class="igl1"><b>${esc(t.s)}</b><span class="igph ${r.ph.k}">${IG_PH[r.ph.k]}</span><span class="igmc">${fmtUsd(t.mc)}</span></span>
+        <span class="igdesc">${esc(r.desc)}</span>
+        <span class="igchips">${chips.map((c) => `<i>${esc(c)}</i>`).join('')}</span>
+      </span>
+      <span class="igside">
+        <span class="igscore"><b>${Math.round(r.s)}</b><small>ignition</small></span>
+        <span class="igmv"><span class="${cls(t.c.m5)}">5m ${fmtMove(t.c.m5)}</span><span class="${cls(t.c.h1)}">1h ${fmtMove(t.c.h1)}</span></span>
+        ${since != null ? `<span class="igsince ${cls(since)}">${fmtPct(since)} since listed${best > 5 ? ` · best ${fmtPct(best)}` : ''}</span>` : ''}
+      </span>
+    </button>`;
+  }).join(''));
+  box.querySelectorAll('img').forEach((im) => im.addEventListener('error', () => im.remove(), { once: true }));
+}
+$('#igBody').addEventListener('click', (e) => { const b = e.target.closest('.igrow'); if (b) openToken(b.dataset.a); });
+setInterval(() => { if (!document.hidden && S.tokens.size) igTick(); }, IG_MS);
+setTimeout(() => { IG.at = 0; igTick(); }, 4000);
 
 // ---------- Boot ----------
 scan();

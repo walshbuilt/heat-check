@@ -6,7 +6,7 @@
   var raw = window.fetch.bind(window);
   var RULES = [
     { re: /\/api\/ohlcv\?/, tries: 7, chart: true },
-    { re: /\/api\/(token|info|ath)\?/, tries: 4 },
+    { re: /\/api\/(token|info|ath|runup)\?/, tries: 4 },
   ];
   var wait = function (ms) { return new Promise(function (ok) { setTimeout(ok, ms); }); };
   function note(on, n) {
