@@ -25,7 +25,7 @@ const TIERS = [
 ];
 const TMAP = Object.fromEntries(TIERS.map((t) => [t.id, t]));
 const WIN_LABEL = { m5: '5m', h1: '1h', h6: '6h', h24: '24h' };
-const RANK_MS = 10000, IG_MS = 10000;
+const RANK_MS = 15000, IG_MS = 15000;
 const SCAN_MS = 12000, PRICE_MS = 3000, TOKEN_MS = 2000, CANDLE_MS = 15000;
 const CARD_ROWS = 5, SHEET_ROWS = 500;
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -429,7 +429,7 @@ function render() {
   explain();
   groups = new Map(TIERS.map((t) => [t.id, []]));
   for (const t of visibleTokens()) groups.get(tierOf(t.mc)).push(t);
-  // Re-rank at most every 10 seconds so rows hold still long enough to tap. Prices and numbers
+  // Re-rank at most every 15 seconds so rows hold still long enough to tap. Prices and numbers
   // still update live in place; only the order waits. New coins slot in by score.
   const reRank = !S.rankAt || Date.now() - S.rankAt >= RANK_MS;
   const prevPos = (t) => S.prevRank.get(t.a)?.rank ?? 1e9;
@@ -1124,7 +1124,7 @@ function igTick() {
   IG.scanned = S.tokens.size;
   const ok = new Map();
   for (const [t, p] of short) { const r = igCheck(t, p); if (typeof r === 'object') ok.set(t.a, r); }
-  // Steady list, refreshed every 10 seconds: a coin needs two passing checks in a row to list, and
+  // Steady list, refreshed every 15 seconds: a coin needs two passing checks in a row to list, and
   // one missed check doesn't drop it, so the list doesn't flicker on a noisy tick.
   const rows = [];
   for (const [a, r] of ok) {
@@ -1132,9 +1132,9 @@ function igTick() {
     sn.hits++; sn.last = now; sn.r = r; IG.seen.set(a, sn);
   }
   for (const [a, sn] of IG.seen) {
-    if (!ok.has(a)) { sn.hits = Math.min(sn.hits, 1); if (now - sn.last > 25e3) { IG.seen.delete(a); continue; } }
+    if (!ok.has(a)) { sn.hits = Math.min(sn.hits, 1); if (now - sn.last > 35e3) { IG.seen.delete(a); continue; } }
     const t = S.tokens.get(a);
-    if (!t || !(sn.hits >= 2 || (sn.listed && now - sn.last <= 25e3))) continue;
+    if (!t || !(sn.hits >= 2 || (sn.listed && now - sn.last <= 35e3))) continue;
     rows.push([t, sn]);
   }
   rows.sort((x, y) => y[1].r.s - x[1].r.s);
