@@ -34,6 +34,15 @@ export default async function handler(req, res) {
       if (preHi == null || x.h > preHi) preHi = x.h;
       preRun = Math.max(preRun, x.h / runLo);
     }
+    // Older than the 7-day hourly window: add daily history (up to 120 days) so a run from weeks ago
+    // still counts as "already ran".
+    let full = c.length >= 160;
+    if (full) {
+      const d = (await candlesFor(pool, 'day', 1, 0, 120, a || 'base').catch(() => null) || []).filter((x) => x.h > 0 && x.l > 0 && x.t < now - 86400);
+      let lo = Infinity;
+      for (const x of d) { const top = Math.max(x.o, x.c); const h = Math.min(x.h, top * 4); lo = Math.min(lo, x.l); if (preHi == null || h > preHi) preHi = h; preRun = Math.max(preRun, h / lo); }
+      if (d.length) full = false;
+    }
     const lowIn = (hrs) => { const s = c.filter((x) => x.t >= now - hrs * 3600); return s.length ? Math.min(...s.map((x) => x.l)) : null; };
     const hiC = c.reduce((m, x) => (x.h > m.h ? x : m), c[0]);
     send(res, 200, {
@@ -41,7 +50,7 @@ export default async function handler(req, res) {
       t0: c[0].t, open0: c[0].o,
       hi: hiC.h, hiT: hiC.t,
       preHi, preRun: Math.round(preRun * 100) / 100,
-      lo72: lowIn(72), lo6: lowIn(6),
+      lo72: lowIn(72), lo6: lowIn(6), partial: full,
     }, 's-maxage=180, stale-while-revalidate=600');
   } catch (e) {
     send(res, 502, { error: String(e.message || e) }, 'no-store');

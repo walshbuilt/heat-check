@@ -156,7 +156,7 @@
     // over the last 6 hours, 30%+ off the 3-day floor and green on the hour and 6 hours.
     var rr = window.HCRun && window.HCRun.get(t.a);
     var hist = !!(rr && rr.n);
-    var ranBefore = hist && rr.preRun >= 4 && !(rr.preHi && t.p >= rr.preHi * 0.85);
+    var ranBefore = hist && (rr.preRun >= 4 || (rr.preHi && rr.preHi >= t.p * 3)) && !(rr.preHi && t.p >= rr.preHi * 0.85);
     var bottomIn = hist && rr.lo6 && rr.lo72 && rr.lo6 >= rr.lo72 * 1.08 && t.p >= rr.lo72 * 1.3 && h1 >= 10 && h6 >= 0;
 
     return { price: price, short: short, trend: trend, ladder: ladder, accel: accel, g30: g30, g1: g1, g2: g2, g3: g3, g4: g4, g5: g5,

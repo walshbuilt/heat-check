@@ -1002,7 +1002,10 @@ const IG_PH = { first: 'First run', brk: 'Breakout', reb: 'Confirmed rebound', e
 function igPhase(t, p, r) {
   if (!r || r.pending || r.failed || !r.n) return null;
   const fromLo = r.lo72 ? t.p / r.lo72 : 1;
-  if (!(r.preRun >= 4)) {
+  // "Already ran" = a 4x+ move before the last 3 hours, or sitting 66%+ under an earlier high
+  // (launched at the top and bled out). Either way it has to prove the bottom first.
+  const ran = r.preRun >= 4 || (r.preHi && r.preHi >= t.p * 3);
+  if (!ran) {
     // Hasn't had a big move before this one. Already 8x off the floor or +600% on the day = late.
     if (fromLo >= 8 || (p.h24 || 0) >= 600) return { k: 'ext', m: 0.55 };
     return { k: 'first', m: fromLo <= 3 ? 1.25 : 1.05 };
