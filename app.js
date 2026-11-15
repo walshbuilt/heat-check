@@ -25,7 +25,7 @@ const TIERS = [
 ];
 const TMAP = Object.fromEntries(TIERS.map((t) => [t.id, t]));
 const WIN_LABEL = { m5: '5m', h1: '1h', h6: '6h', h24: '24h' };
-const RANK_MS = 15000, IG_MS = 15000;
+const RANK_MS = 12000, IG_MS = 15000;
 const SCAN_MS = 12000, PRICE_MS = 3000, TOKEN_MS = 2000, CANDLE_MS = 15000;
 const CARD_ROWS = 5, SHEET_ROWS = 500;
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -450,11 +450,12 @@ function render() {
   if (S.tokens.size) $('#loading').hidden = true;
   explain();
   groups = new Map(TIERS.map((t) => [t.id, []]));
-  for (const t of visibleTokens()) groups.get(tierOf(t.mc)).push(t);
-  // Re-rank at most every 15 seconds so rows hold still long enough to tap. Prices and numbers
-  // still update live in place; only the order waits. New coins slot in by score.
+  // Lists hold still for 12 to 15 seconds at a time so rows can be read and tapped. Between re-ranks a coin
+  // keeps both its position and its tier (even if its market cap crosses a tier line), and new coins
+  // join at the bottom. Prices and numbers still update live in place; only the order waits.
   const reRank = !S.rankAt || Date.now() - S.rankAt >= RANK_MS;
   const prevPos = (t) => S.prevRank.get(t.a)?.rank ?? 1e9;
+  for (const t of visibleTokens()) groups.get((!reRank && S.prevRank.get(t.a)?.tier) || tierOf(t.mc)).push(t);
   for (const arr of groups.values()) arr.sort(reRank ? (a, b) => sortKey(b) - sortKey(a) : (a, b) => prevPos(a) - prevPos(b) || sortKey(b) - sortKey(a));
   if (reRank) S.rankAt = Date.now();
 
