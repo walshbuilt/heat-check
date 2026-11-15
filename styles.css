@@ -352,6 +352,7 @@ main{padding:10px clamp(12px,3vw,32px) 20px;display:grid;grid-template-columns:r
 .igmc{font-size:13px;color:var(--text);font-weight:600}
 .igph{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:3px 7px;border-radius:999px;border:1px solid}
 .igph.run{color:#ff8a2a;border-color:rgba(255,138,42,.5);background:rgba(255,138,42,.1)}
+.igph.start{color:#4fe0a8;border-color:rgba(79,224,168,.45);background:rgba(79,224,168,.08)}
 .igph.first{color:#4fe0a8;border-color:rgba(79,224,168,.45);background:rgba(79,224,168,.08)}
 .igph.brk{color:#ffd166;border-color:rgba(255,209,102,.45);background:rgba(255,209,102,.08)}
 .igph.reb{color:#7fd4ff;border-color:rgba(127,212,255,.45);background:rgba(127,212,255,.08)}
