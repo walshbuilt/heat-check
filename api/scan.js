@@ -154,6 +154,18 @@ async function discover() {
 
 // Fast lane: Jupiter's 5-minute lists (what's trending / most traded / most organic RIGHT NOW),
 // checked every 30s so a fresh breakout shows up within a minute instead of up to 3.
+// 15-minute price change: Jupiter only reports 5m and 1h, so the scanner keeps its own one-a-minute
+// price samples per coin (17 minutes' worth) and compares against the one from about 15 minutes ago.
+const px = new Map(); // mint -> [[ms, price], ...]
+function change15(a, p, now) {
+  if (!(p > 0)) return null;
+  let arr = px.get(a);
+  if (!arr) { arr = []; px.set(a, arr); }
+  if (!arr.length || now - arr[arr.length - 1][0] >= 55e3) arr.push([now, p]);
+  while (arr.length && now - arr[0][0] > 17 * 60e3) arr.shift();
+  const old = arr.find((x) => now - x[0] >= 13 * 60e3);
+  return old && old[1] > 0 ? Math.round((p / old[1] - 1) * 1000) / 10 : null;
+}
 let lastFast = 0;
 const FAST_MS = 30e3;
 const hot = new Map(); // mint -> when it last appeared on a 5-minute list
@@ -193,9 +205,12 @@ export default async function handler(req, res) {
       if (Object.keys(so).length) rest.so = so;
       const c = cto.get(r.a);
       if (c) rest.ct = { m: Math.max(0, Math.round((now - c.at) / 60e3)), d: c.d, x: c.x, tg: c.tg, w: c.w };
+      const c15 = change15(r.a, r.p, now);
+      if (c15 != null) rest.c15 = c15;
       if (hot.has(r.a)) rest.hot5 = Math.max(0, Math.round((now - hot.get(r.a)) / 60e3));
       return rest;
     });
+    if (px.size > 3000) for (const [k, v] of px) if (!v.length || now - v[v.length - 1][0] > 5 * 60e3) px.delete(k);
     send(res, 200, { t: Date.now(), n: tokens.length, disc, tokens }, 's-maxage=10, stale-while-revalidate=5');
   } catch (e) {
     send(res, 500, { error: String(e.message || e) }, 'no-store');

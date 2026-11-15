@@ -159,7 +159,7 @@ function heatOf(t) {
 }
 MH.onUpdate = () => { render(); if (openMint) paintDrawer(); };
 // Keep scanner-only fields (social signals) when a faster price refresh replaces a row.
-function keep(t) { const prev = S.tokens.get(t.a); if (prev && prev.so && !t.so) t.so = prev.so; if (prev && prev.tr && !t.tr) t.tr = prev.tr; if (prev && prev.ct && !t.ct) t.ct = prev.ct; return t; }
+function keep(t) { const prev = S.tokens.get(t.a); if (prev && prev.so && !t.so) t.so = prev.so; if (prev && prev.tr && !t.tr) t.tr = prev.tr; if (prev && prev.ct && !t.ct) t.ct = prev.ct; if (prev && prev.c15 != null && t.c15 == null) t.c15 = prev.c15; if (prev && prev.devM != null && t.devM == null) t.devM = prev.devM; return t; }
 
 // ---------- Derived ----------
 const ratio = (t) => (t.mc ? (t.v[S.win] || 0) / t.mc : 0);
@@ -212,6 +212,27 @@ async function api(path) {
   if (!r.ok) throw new Error(r.status);
   return r.json();
 }
+// This page's own price samples (one every 30s, 17 minutes kept), used for the 15-minute change when
+// the scanner doesn't have one yet.
+const PXH = new Map();
+function pxNote(t) {
+  if (!(t.p > 0)) return;
+  const now = Date.now();
+  let a = PXH.get(t.a);
+  if (!a) { a = []; PXH.set(t.a, a); }
+  if (!a.length || now - a[a.length - 1][0] >= 30e3) a.push([now, t.p]);
+  while (a.length && now - a[0][0] > 17 * 60e3) a.shift();
+}
+// Measured 15-minute change in %, or null if neither the scanner nor this page has 13+ minutes of prices.
+function chg15(t) {
+  if (t.c15 != null) return t.c15;
+  const a = PXH.get(t.a), now = Date.now();
+  const old = a && a.find((x) => now - x[0] >= 13 * 60e3);
+  return old && old[1] > 0 ? (t.p / old[1] - 1) * 100 : null;
+}
+// Ranking key: the measured 15-minute change, or an estimate from the 5-minute and 1-hour changes
+// until one exists (the row then shows 5m instead of 15m).
+const mv15 = (t) => { const c = chg15(t); if (c != null) return c; const m5 = t.c.m5 || 0, h1 = t.c.h1 || 0; return m5 + Math.max(-m5, Math.min(h1 - m5, 60)) * (10 / 55); };
 let scanBusy = false;
 async function scan() {
   if (scanBusy || document.hidden) return;
@@ -219,7 +240,7 @@ async function scan() {
   try {
     const d = await api('/api/scan');
     const seen = new Set();
-    for (const t of d.tokens) { t._new = !S.tokens.has(t.a) && !S.first; S.tokens.set(t.a, t); seen.add(t.a); }
+    for (const t of d.tokens) { t._new = !S.tokens.has(t.a) && !S.first; S.tokens.set(t.a, t); seen.add(t.a); pxNote(t); }
     for (const k of [...S.tokens.keys()]) if (!seen.has(k) && k !== openMint) S.tokens.delete(k);
     S.lastScan = Date.now();
     setStatus('live');
@@ -446,7 +467,7 @@ function render() {
   if (!dragging) wanted.forEach((id, i) => { const el = tierEls.get(id); if (main.children[i] !== el) main.insertBefore(el, main.children[i] || null); });
   else wanted.forEach((id) => { const el = tierEls.get(id); if (!el.isConnected) main.appendChild(el); });
 
-  setHTML($('#jump'), `<button data-j="ignite" class="jig">Top 10<span>${window.__igN || 0}</span></button><button data-j="cto" class="jcto">CTO<span>${window.__ctoN || 0}</span></button>` + wanted.map((id) => `<button data-j="${id}">${TMAP[id].label}<span>${groups.get(id).length}</span></button>`).join(''));
+  setHTML($('#jump'), `<button data-j="ignite" class="jig">Top 10<span>${window.__igN || 0}</span></button>` + wanted.map((id) => `<button data-j="${id}">${TMAP[id].label}<span>${groups.get(id).length}</span></button>`).join(''));
   const used = new Set();
   const cols = colsHTML();
   for (const id of wanted) {
@@ -677,7 +698,7 @@ function showToken(a) {
   document.body.style.overflow = 'hidden';
   scrimSync();
   $('#drawer').querySelector('.dbody').scrollTop = 0;
-  ['#dKeys', '#dChips', '#dHeat', '#dSafety', '#dAbout', '#dTraction', '#dStats', '#dLinks'].forEach((s) => { $(s)._h = null; $(s).innerHTML = ''; });
+  ['#dKeys', '#dChips', '#dTop', '#dHeat', '#dSafety', '#dAbout', '#dTraction', '#dStats', '#dLinks'].forEach((s) => { $(s)._h = null; $(s).innerHTML = ''; });
   dPrev = {};
   candles = []; lastCandle = null; chartFor = null; chartPool = null;
   if (!tfManual) { S.tf = autoTf(S.tokens.get(a)); paintTf(); }
@@ -795,6 +816,8 @@ function paintDrawer() {
     `<div class="key"><span>Liquidity</span><b>${t.liq ? fmtUsd(t.liq) : 'Curve'}</b><small>${t.liq && t.mc ? (t.liq / t.mc * 100).toFixed(1) + '% of MC' : 'pump.fun bonding curve'}</small></div>`);
   const h4 = S.h4.get(t.a), c4 = h4?.p4 && t.p ? (t.p / h4.p4 - 1) * 100 : null;
   setHTML($('#dChips'), ['m5', 'h1', 'h4', 'h24'].map((k) => { const v = k === 'h4' ? c4 : t.c[k]; return `<div class="chip ${k === S.win ? 'hero' : ''}">Change ${k === 'h4' ? '4h' : WIN_LABEL[k]}<b class="${cls(v)}">${fmtMove(v)}</b></div>`; }).join(''));
+  const ts = topStatus(t);
+  setHTML($('#dTop'), `<b class="${ts.on ? 'on' : ''}">${esc(ts.txt)}</b>` + (ts.on ? '' : `<small>${esc(ts.a)}</small><small>${esc(ts.b)}</small>`));
   setHTML($('#dHeat'), MH.card(t, esc, g));
 
   // Safety
@@ -853,7 +876,7 @@ function paintDrawer() {
   const links = [
     [t.url || `https://dexscreener.com/solana/${t.pair}`, 'DexScreener'], ['https://solscan.io/token/' + t.a, 'Solscan'], ['https://rugcheck.xyz/tokens/' + t.a, 'RugCheck'],
     ...(/pump$/.test(t.a) || /pump/i.test(info?.launchpad || '') ? [['https://pump.fun/coin/' + t.a, 'pump.fun']] : []),
-    ['https://jup.ag/swap/SOL-' + t.a, 'Jupiter'], ['https://gmgn.ai/sol/token/' + t.a, 'GMGN'],
+    ['https://jup.ag/swap/SOL-' + t.a, 'Jupiter'], ['https://gmgn.ai/sol/token/' + t.a, 'GMGN'], ['https://larpcheck.app', 'LARPCHECK'],
     ...[info?.website, ...(t.web || [])].filter(Boolean).slice(0, 1).map((u) => [u, 'Website']),
     ...(t.soc || []).map((s) => [s.u, /twitter/i.test(s.t || '') ? 'X' : String(s.t || 'Link').replace(/^./, (x) => x.toUpperCase())]),
   ].filter(([u]) => safeUrl(u));
@@ -1048,7 +1071,7 @@ const BUZZ_MIN = 20;
 // toward the $40K–$120K zone and toward a coin's FIRST run. Coins that already ran only make it as a
 // confirmed rebound (higher low, back above the floor, buyers in control) or a breakout over old highs.
 // Every coin needs a full RugCheck report, run history and a real description before it can list.
-const IG = { run: new Map(), seen: new Map(), log: igLoad(), at: 0, fetching: 0, scanned: 0, listed: [] };
+const IG = { run: new Map(), seen: new Map(), log: igLoad(), at: 0, fetching: 0, scanned: 0, listed: [], fill: [] };
 window.HCRun = IG.run;
 function igLoad() { try { const o = JSON.parse(localStorage.getItem('hc_ig') || '{}'); const cut = Date.now() - 48 * 3600e3; for (const k in o) if (!(o[k].t0 > cut)) delete o[k]; return o; } catch { return {}; } }
 function igSave() { try { localStorage.setItem('hc_ig', JSON.stringify(IG.log)); } catch {} }
@@ -1112,30 +1135,59 @@ function igPhase(t, p, r) {
   return { k: 'no', m: 0 };
 }
 // Cheap checks on data we already have. Returns the heat parts if the coin is worth a deeper look.
-// Established = $250K+ market cap and at least a day old. Those may list with Caution flags (labeled);
-// newer and smaller coins must be Clean. Red flags never list.
+// Established = $250K+ market cap and at least a day old: may list with Caution flags (labeled).
+// Community coin = $250K+, a week or more old, 1,000+ holders: concentration and insider limits no
+// longer block it, and it may list with any grade. Hard rug signals always block.
 const igEstablished = (t) => t.mc >= 250e3 && t.age && Date.now() - t.age >= 24 * 3600e3;
-function igPre(t) {
-  if (!(t.mc >= 25e3) || !t.p) return null;
-  const g0 = gradeOf(t);
-  if (g0 === 'red' || (g0 === 'amber' && !igEstablished(t))) return null;
-  if (t.f.some((x) => BOT_FLAGS.has(x.k))) return null;
-  if (t.ol === 'low') return null;
-  if (t.dev != null && t.dev >= igIns(t.mc).dev) return null;
-  if ((t.devM || 0) >= 5) return null;
-  if (unloading(t)) return null;
-  if (t.aud && (!t.mintOff || !t.frzOff)) return null;
-  if (t.top != null && t.top >= igConcLim(t.mc) + 10) return null;
-  if (t.hold != null && t.hold < 150) return null;
+const igCommunity = (t) => t.mc >= 250e3 && t.age && Date.now() - t.age >= 7 * 86400e3 && (S.info.get(t.a)?.holders || t.hold || 0) >= 1000;
+// Things that block a coin from both parts of the Top 10, whatever its size or age.
+function hardBlock(t) {
+  if (!(t.mc >= 25e3) || !t.p) return 'Under $25K market cap';
+  if (t.aud && (!t.mintOff || !t.frzOff)) return 'The dev can still mint new coins or freeze wallets';
+  if (t.f.some((x) => BOT_FLAGS.has(x.k))) return 'Bot or wash-trading signals';
+  if (S.risk.get(t.a)?.risks?.some((x) => /rugged/i.test(x.n))) return 'Marked as rugged';
+  if (unloading(t)) return 'Big wallets are selling into the buys';
+  return '';
+}
+function igPre(t, out = {}) {
+  const no = (w) => { out.why = w; return null; };
+  const hb = hardBlock(t);
+  if (hb) return no(hb);
+  const g0 = gradeOf(t), com = igCommunity(t);
+  if (g0 === 'red' && !com) return no('Red safety flags (' + (topWhy(t) || 'see safety report') + '), and not yet an established community coin');
+  if (g0 === 'amber' && !igEstablished(t)) return no('Caution flags (' + (topWhy(t) || 'see safety report') + ') on a coin under $250K or less than a day old');
+  if (t.ol === 'low') return no('Trading looks mostly non-organic');
+  if (!com && t.dev != null && t.dev >= igIns(t.mc).dev) return no(`Dev wallet holds ${t.dev}%`);
+  if ((t.devM || 0) >= 5 && !com) return no(`Dev has launched ${t.devM} coins`);
+  if (!com && t.top != null && t.top >= igConcLim(t.mc) + 10) return no(`Top holders own ${Math.round(t.top)}%`);
+  if (t.hold != null && t.hold < 150) return no('Fewer than 150 holders');
   const p = MH.parts(t, g0);
-  if (p.dead || p.stale || p.dumping || p.bot || p.botChurn) return null;
-  if (p.short < 0.3 || p.buying < 0.5 || p.organic < 0.45) return null;
-  if ((t.v.m5 || 0) < Math.max(1500, t.mc * 0.006) || (p.tr5 || 0) < 12) return null;
+  if (p.dead || p.stale) return no('Barely trading right now');
+  if (p.dumping) return no('Selling is winning right now');
+  if (p.bot || p.botChurn) return no('Looks like bot trading');
+  if (p.short < 0.3) return no('Price isn\'t pushing up right now');
+  if (p.buying < 0.5) return no('Buyers aren\'t in control right now');
+  if (p.organic < 0.45) return no('Not enough real-trader activity');
+  if ((t.v.m5 || 0) < Math.max(1500, t.mc * 0.006) || (p.tr5 || 0) < 12) return no('Not enough volume or traders in the last 5 minutes');
   const ageH = t.age ? (Date.now() - t.age) / 3600e3 : 99;
-  if (ageH > 2 && t.os != null && t.os < 55) return null;
+  if (ageH > 2 && t.os != null && t.os < 55) return no(`Organic score ${t.os} is under 55`);
   return p;
 }
-window.HCIgWhy = (a) => { const t = S.tokens.get(a); if (!t) return 'not tracked'; const p = igPre(t); if (!p) return 'failed quick checks'; const r = igCheck(t, p); return typeof r === 'string' ? r : 'passes · ' + r.ph.k + ' · score ' + Math.round(r.s); };
+const IG_WHY = { wait: 'Still loading its safety report and price history', norisk: 'No safety report available', conc: 'Holders too concentrated or too many insider wallets for its size and age', dump: 'Big wallets are selling into the buys', rug: 'Marked as rugged', lp: 'Liquidity isn\'t locked', phase: 'Moving, but not at the start of a run (or no fresh breakout)', desc: 'No website or X account', buzz: 'Not enough community attention yet (Buzz under 20)' };
+// A working product: the coin's site is live and links an app, docs or code (not a template or "coming soon").
+function productOf(t) {
+  const u = MA.siteUrl(t, S.info.get(t.a)), s = u ? S.site.get(u) : null;
+  if (!s || !s.ok || s.soon || s.template) return '';
+  return s.app ? 'Live app' : s.github ? 'Public code' : s.docs ? 'Docs' : s.spa ? 'Web app' : '';
+}
+function siteFetch(t) {
+  const info = S.info.get(t.a);
+  if (!info || info.pending) return;
+  const u = MA.siteUrl(t, info);
+  if (!u || S.site.has(u)) return;
+  S.site.set(u, null);
+  api(`/api/site?u=${encodeURIComponent(u)}&a=${t.a}`).then((d) => S.site.set(u, d)).catch(() => S.site.set(u, { ok: false, error: 'unreachable' }));
+}
 const igMom = (p) => 0.4 * p.short + 0.15 * p.accel + 0.25 * p.buying + 0.2 * p.volume;
 // Full check. Returns { s, p, ph, rk, info } or a string saying what's still missing / failed.
 function igCheck(t, p) {
@@ -1144,9 +1196,10 @@ function igCheck(t, p) {
   if (rk.failed || rk.top10 == null) return 'norisk';
   const lim = igConcLim(t.mc);
   const il = igIns(t.mc);
-  if (rk.top10 >= lim || (rk.ins || 0) >= il.pct || (rk.insN || 0) > il.n || (rk.cre || 0) >= il.dev) return 'conc';
+  const com = igCommunity(t);
+  if (!com && (rk.top10 >= lim || (rk.ins || 0) >= il.pct || (rk.insN || 0) > il.n || (rk.cre || 0) >= il.dev)) return 'conc';
   if (unloading(t)) return 'dump';
-  if ((rk.graph || 0) >= 25) return 'conc';
+  if (!com && (rk.graph || 0) >= 25) return 'conc';
   if (rk.risks?.some((x) => /rugged/i.test(x.n))) return 'rug';
   const curve = t.f.some((x) => x.k === 'curve');
   if (!curve && rk.lp != null && rk.lp < 50) return 'lp';
@@ -1164,12 +1217,42 @@ function igCheck(t, p) {
   const insF = 1 - Math.min(rk.ins || 0, il.pct) / (il.pct * 2);
   const qual = 0.4 * p.organic + 0.25 * spread + 0.2 * conc + 0.15 * insF;
   // Soft cap so the very best spread out instead of all reading 99.
-  const raw = 100 * igMom(p) * (0.55 + 0.45 * qual) * igZone(t.mc) * ph.m;
+  const prod = productOf(t);
+  const raw = 100 * igMom(p) * (0.55 + 0.45 * qual) * igZone(t.mc) * ph.m * (prod ? 1.15 : 1);
   const bz = buzzOf(t);
   if (bz.s < BUZZ_MIN) return 'buzz';
   const s = 100 * (1 - Math.exp(-(raw * (0.7 + 0.6 * bz.s / 100)) / 60));
-  return { s, p, ph, rk, info, desc, bz };
+  return { s, p, ph, rk, info, desc, bz, prod, com };
 }
+// Running now: fills the Top 10 under the Igniting coins. Anything moving up over the last 15 minutes
+// with real volume and no hard rug signal, whatever its safety grade (the grade is shown on the row).
+// Red-flag coins need to be at least a day old.
+function runWhy(t) {
+  const hb = hardBlock(t);
+  if (hb) return hb;
+  const g = gradeOf(t);
+  if (g === 'red' && !(t.age && Date.now() - t.age >= 24 * 3600e3)) return 'Red safety flags on a coin less than a day old';
+  const p = MH.parts(t, g);
+  if (p.dead || p.stale) return 'Barely trading right now';
+  if (p.bot || p.botChurn) return 'Looks like bot trading';
+  if (p.dumping) return 'Selling is winning right now';
+  if ((t.v.m5 || 0) < Math.max(1000, t.mc * 0.003)) return 'Not enough volume in the last 5 minutes';
+  if (!(mv15(t) > 1)) return 'Not up over the last 15 minutes';
+  return '';
+}
+// Plain-English Top 10 status for the coin page.
+function topStatus(t) {
+  const i = IG.listed.findIndex((x) => x[0].a === t.a);
+  if (i >= 0) return { on: true, txt: `#${i + 1} in the Top 10 · Igniting` };
+  const j = IG.fill.findIndex((x) => x.a === t.a);
+  if (j >= 0) return { on: true, txt: `#${IG.listed.length + j + 1} in the Top 10 · Running now` };
+  const out = {}, p = igPre(t, out);
+  let w = out.why;
+  if (p) { const r = igCheck(t, p); w = typeof r === 'string' ? IG_WHY[r] || r : 'Passes every check; waiting for a second confirmation or outranked by ten others'; }
+  const rw = runWhy(t);
+  return { on: false, txt: 'Not in the Top 10', a: 'Igniting: ' + w + '.', b: 'Running now: ' + (rw || 'qualifies, but ten other coins are moving faster') + '.' };
+}
+window.HCIgWhy = (a) => { const t = S.tokens.get(a); return t ? topStatus(t) : 'not tracked'; };
 // Run histories are fetched through a small queue (3 at a time) so every shortlisted coin is ready
 // by the next 10-second refresh without hammering the rate-limited chart source.
 const igQ = [];
@@ -1199,6 +1282,16 @@ function igFetch(list) {
   }
   igPump();
   pumpRisk();
+  list.forEach(siteFetch);
+}
+// Running coins only need the safety report and profile (no chart history, which is rate limited).
+function fillFetch(list) {
+  for (const t of list) {
+    if (!S.risk.has(t.a) && !riskQ.includes(t.a)) riskQ.unshift(t.a);
+    if (!S.info.has(t.a)) { S.info.set(t.a, { pending: true }); api('/api/info?a=' + t.a).then((d) => S.info.set(t.a, d)).catch(() => S.info.set(t.a, { failed: true })); }
+    siteFetch(t);
+  }
+  pumpRisk();
 }
 function igTick() {
   const now = Date.now();
@@ -1227,7 +1320,14 @@ function igTick() {
   }
   rows.sort((x, y) => y[1].r.s - x[1].r.s);
   IG.listed = rows.slice(0, 10);
-  window.__igN = IG.listed.length;
+  // Fill the rest of the ten with coins that are running, biggest 15-minute gain first.
+  const have = new Set(IG.listed.map((x) => x[0].a));
+  const cand = [];
+  for (const t of S.tokens.values()) if (!have.has(t.a) && !runWhy(t)) cand.push(t);
+  cand.sort((x, y) => mv15(y) - mv15(x));
+  IG.fill = cand.slice(0, 10 - IG.listed.length);
+  fillFetch(IG.fill);
+  window.__igN = IG.listed.length + IG.fill.length;
   let dirty = false;
   for (const [t, sn] of IG.listed) {
     sn.listed = true;
@@ -1246,13 +1346,33 @@ function igTick() {
 function paintIgnite() {
   const box = $('#igBody');
   if (!box) return;
-  $('#igCount').textContent = IG.listed.length ? `${IG.listed.length} of 10` : '0 of 10';
+  const total = IG.listed.length + IG.fill.length;
+  $('#igCount').textContent = `${total} of 10` + (total ? ` · ${IG.listed.length} igniting` : '');
   const rec = igRecord(), recEl = $('#igRecord');
   if (recEl) recEl.textContent = rec.done || rec.open ? 'Calls seen on this device, last 48h: ' + (rec.done ? `${rec.wins} of ${rec.done} finished calls hit target` : 'none finished yet') + (rec.open ? ` · ${rec.open} still in their 4-hour window` : '') + '.' : '';
-  if (!IG.listed.length) {
-    setHTML(box, `<div class="igempty"><b>Nothing passes the bar right now.</b><span>Watching ${IG.scanned} coins. A coin lists only when it's clean, spread out, has a real description and is moving early.</span></div>`);
+  if (!total) {
+    setHTML(box, `<div class="igempty"><b>Nothing is running right now.</b><span>Watching ${IG.scanned} coins.</span></div>`);
     return;
   }
+  const fillHTML = (IG.fill.length ? `<div class="igdiv"><b>Running now</b><span>Up over the last 15 minutes with real volume, biggest gain first. Not fully vetted: check each label.</span></div>` : '') + IG.fill.map((t, i) => {
+    const img = safeUrl(t.img), g = gradeOf(t), c15 = chg15(t), mv = c15 != null ? c15 : t.c.m5, why = topWhy(t);
+    const av = img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="ph">${esc((t.s || '?').slice(0, 2))}</span>`;
+    const lab = g === 'green' ? 'Clean' : (g === 'amber' ? 'Caution' : 'High risk') + (why ? ': ' + why : '');
+    const hold = S.info.get(t.a)?.holders || t.hold, prod = productOf(t);
+    const chips = [hold ? `${Math.round(hold).toLocaleString()} holders` : '', t.os != null ? `Organic ${t.os}` : '', `Buzz ${buzzOf(t).s}`, prod, igCommunity(t) ? 'Community coin' : '', t.age ? `Age ${fmtAge(t.age)}` : ''].filter(Boolean);
+    return `<button class="igrow runrow" data-a="${esc(t.a)}">
+      <span class="igrk">${IG.listed.length + i + 1}</span>
+      <span class="igav">${av}</span>
+      <span class="igmain">
+        <span class="igl1"><b>${esc(t.s)}</b><span class="igmc">${fmtUsd(t.mc)}</span></span>
+        <span class="igchips"><i class="g-${g}">${esc(lab)}</i>${chips.map((c) => `<i>${esc(c)}</i>`).join('')}</span>
+      </span>
+      <span class="igside">
+        <span class="igscore"><b class="${cls(mv)}">${fmtPct(mv)}</b><small>${c15 != null ? '15 min' : '5 min'}</small></span>
+        <span class="igmv"><span class="${cls(t.c.m5)}">5m ${fmtMove(t.c.m5)}</span><span class="${cls(t.c.h1)}">1h ${fmtMove(t.c.h1)}</span></span>
+      </span>
+    </button>`;
+  }).join('');
   setHTML(box, IG.listed.map(([t, sn], i) => {
     const r = sn.r, L = IG.log[t.a], img = safeUrl(t.img);
     const av = img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="ph">${esc((t.s || '?').slice(0, 2))}</span>`;
@@ -1263,15 +1383,15 @@ function paintIgnite() {
     const g = gradeOf(t), tg = L ? igTarget(L.mc0 || 0) : null;
     const left = L ? IG_WIN_MS - (Date.now() - L.t0) : 0;
     const bestX = L && L.p0 ? (L.hi4 || L.p0) / L.p0 : null;
-    const goal = !L ? '' : bestX >= tg ? `Hit ${tg}x target` : left > 0 ? `Target ${tg}x · best ${bestX.toFixed(1)}x · ${left >= 3600e3 ? Math.floor(left / 3600e3) + 'h ' : ''}${Math.round((left % 3600e3) / 60e3)}m left` : `Missed ${tg}x · best ${bestX.toFixed(1)}x`;
-    const chips = [g === 'amber' ? 'Caution: ' + (topWhy(t) || 'warning flags') : '', `Buzz ${r.bz.s}`, `Top 10 hold ${Math.round(r.rk.top10)}%`, `Insiders ${(r.rk.ins || 0).toFixed(1)}%`, hold ? `${Math.round(hold).toLocaleString()} holders` : '', os].filter(Boolean);
+    const goal = !L ? '' : bestX >= tg ? `Hit ${tg}x target` : left > 0 ? `Target ${tg}x · best ${bestX.toFixed(1)}x · ${left >= 3600e3 ? Math.floor(left / 3600e3) + 'h ' : ''}${Math.floor((left % 3600e3) / 60e3)}m left` : `Missed ${tg}x · best ${bestX.toFixed(1)}x`;
+    const chips = [g === 'amber' ? 'Caution: ' + (topWhy(t) || 'warning flags') : g === 'red' ? 'High risk: ' + (topWhy(t) || 'red flags') : '', r.com ? 'Community coin' : '', productOf(t), `Buzz ${r.bz.s}`, `Top 10 hold ${Math.round(r.rk.top10)}%`, `Insiders ${(r.rk.ins || 0).toFixed(1)}%`, hold ? `${Math.round(hold).toLocaleString()} holders` : '', os].filter(Boolean);
     return `<button class="igrow" data-a="${esc(t.a)}">
       <span class="igrk">${i + 1}</span>
       <span class="igav">${av}</span>
       <span class="igmain">
         <span class="igl1"><b>${esc(t.s)}</b><span class="igph ${r.ph.k}">${IG_PH[r.ph.k]}</span><span class="igmc">${fmtUsd(t.mc)}</span></span>
         ${r.desc ? `<span class="igdesc">${esc(r.desc)}</span>` : ''}
-        <span class="igchips">${chips.map((c) => `<i${/^Caution/.test(c) ? ' class="g-amber"' : ''}>${esc(c)}</i>`).join('')}</span>
+        <span class="igchips">${chips.map((c) => `<i${/^Caution/.test(c) ? ' class="g-amber"' : /^High risk/.test(c) ? ' class="g-red"' : ''}>${esc(c)}</i>`).join('')}</span>
       </span>
       <span class="igside">
         <span class="igscore"><b>${Math.round(r.s)}</b><small>ignition</small></span>
@@ -1280,7 +1400,7 @@ function paintIgnite() {
         ${goal ? `<span class="iggoal${bestX >= tg ? ' hit' : ''}">${esc(goal)}</span>` : ''}
       </span>
     </button>`;
-  }).join(''));
+  }).join('') + fillHTML);
   box.querySelectorAll('img').forEach((im) => im.addEventListener('error', () => im.remove(), { once: true }));
 }
 $('#igBody').addEventListener('click', (e) => { const b = e.target.closest('.igrow'); if (b) openToken(b.dataset.a); });
@@ -1337,57 +1457,11 @@ function paintCto() {
   pumpRisk();
   for (const t of S.tokens.values()) if (t.ct && !S.info.has(t.a)) { S.info.set(t.a, { pending: true }); api('/api/info?a=' + t.a).then((d) => S.info.set(t.a, d)).catch(() => S.info.set(t.a, { failed: true })); }
   const list = ctoList();
-  window.__ctoN = list.length;
-  const jb = document.querySelector('#jump .jcto span');
-  if (jb) jb.textContent = list.length;
-  $('#ctoCount').textContent = list.length ? `${list.length} live` : '';
-  let dirty = false;
-  const now = Date.now();
-  for (const t of list) {
-    const L = CT.log[t.a];
-    if (!L) { CT.log[t.a] = { p0: t.p, t0: now, hi: t.p }; dirty = true; }
-    else if (t.p > L.hi) { L.hi = t.p; dirty = true; }
-  }
-  if (dirty) { try { localStorage.setItem('hc_cto', JSON.stringify(CT.log)); } catch {} }
-  if (!list.length) {
-    setHTML(box, `<div class="igempty"><b>No takeover has real backing right now.</b><span>Takeovers are checked every 30 seconds. One lists only when money is coming in: real volume, more buying than selling, and holders growing.</span></div>`);
-    return;
-  }
-  setHTML(box, list.map((t, i) => {
-    const c = t.ct, img = safeUrl(t.img), g = gradeOf(t), L = CT.log[t.a];
-    const av = img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="ph">${esc((t.s || '?').slice(0, 2))}</span>`;
-    const fresh = c.m < 60 ? 'fresh' : c.m < 360 ? 'recent' : 'older';
-    const since = L && L.p0 && now - L.t0 > 60e3 ? (t.p / L.p0 - 1) * 100 : null;
-    const rk = S.risk.get(t.a);
-    const h = Math.round(heatOf(t));
-    const bs = t.bs?.h1;
-    const bz = buzzOf(t);
-    const chips = [
-      GRADE_TXT[g],
-      `Buzz ${bz.s}` + (bz.why.length ? ' · ' + bz.why.slice(0, 2).join(', ') : ''),
-      bs ? `1h buys ${fmtUsd(bs[0])} vs sells ${fmtUsd(bs[1])}` : '',
-      t.nb?.h1 > 0 ? `+${t.nb.h1} net buyers 1h` : '',
-      t.hold ? `${Math.round(t.hold).toLocaleString()} holders` : '',
-      rk && rk.top10 != null ? `Top 10 hold ${Math.round(rk.top10)}%` : t.top != null ? `Top holders ${Math.round(t.top)}%` : '',
-      t.os != null ? `Organic ${t.os}` : '',
-      t.age ? `Coin age ${fmtAge(t.age)}` : '',
-    ].filter(Boolean);
-    return `<button class="igrow ctorow" data-a="${esc(t.a)}">
-      <span class="igrk">${i + 1}</span>
-      <span class="igav">${av}</span>
-      <span class="igmain">
-        <span class="igl1"><b>${esc(t.s)}</b><span class="ctoage ${fresh}">CTO ${ctoAge(c.m)} ago</span><span class="igmc">${fmtUsd(t.mc)}</span></span>
-        ${c.d ? `<span class="igdesc">${esc(c.d)}</span>` : ''}
-        <span class="igchips">${chips.map((x, k) => `<i${k === 0 ? ` class="g-${g}"` : ''}>${esc(x)}</i>`).join('')}</span>
-      </span>
-      <span class="igside">
-        <span class="igscore"><b>${h}</b><small>heat</small></span>
-        <span class="igmv"><span class="${cls(t.c.m5)}">5m ${fmtMove(t.c.m5)}</span><span class="${cls(t.c.h1)}">1h ${fmtMove(t.c.h1)}</span></span>
-        ${since != null ? `<span class="igsince ${cls(since)}">${fmtPct(since)} since spotted</span>` : ''}
-      </span>
-    </button>`;
-  }).join(''));
-  box.querySelectorAll('img').forEach((im) => im.addEventListener('error', () => im.remove(), { once: true }));
+  // A footnote under the Top 10: good to know, not a pick.
+  setHTML(box, `<b>Community takeovers</b>` + (list.length
+    ? list.map((t) => `<button class="ctorow" data-a="${esc(t.a)}">${esc(t.s)} · ${fmtUsd(t.mc)} · claimed ${ctoAge(t.ct.m)} ago</button>`).join('')
+    : `<span>None with real backing right now.</span>`) +
+    `<small>From DexScreener's takeover claims, kept only if claimed 24h+ after launch, with real buying, under 10 linked insider wallets and no serial-launcher dev.</small>`);
 }
 $('#ctoBody').addEventListener('click', (e) => { const b = e.target.closest('.ctorow'); if (b) openToken(b.dataset.a); });
 setInterval(() => { if (!document.hidden) paintCto(); }, 10000);

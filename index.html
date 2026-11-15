@@ -60,19 +60,13 @@
 <section class="ignite" id="ignite" aria-label="Igniting now, top 10">
   <div class="ighead">
     <div class="igtitle"><img src="/flame.svg" alt="" width="22" height="32"><h2>Igniting Now</h2><span class="igtag">Top 10</span><span class="igcount" id="igCount"></span></div>
-    <p class="igrules">Coins at the start of a run right now, at any market cap. A good call means 3x within 4 hours for coins listed under $100K, and 2x for coins at $100K and up. Confirmed runs rank highest: green on the hour and over 4 hours, at or near the 7-day high, a higher low underneath, buyers in control and more new buyers than sellers. Coins under $250K or less than a day old must be Clean; established coins may list with Caution flags, labeled. Red flags, big insider networks, serial launchers and wallets unloading into buys never list.</p>
+    <p class="igrules"><b>Igniting</b> coins come first: at the start of a run, vetted for safety, with real community attention. A good call is 3x within 4 hours under $100K, 2x at $100K and up. The rest of the ten is filled with coins that are <b>Running now</b>, ranked by their gain over the last 15 minutes and labeled Clean, Caution or High risk. Established community coins (a week old, 1,000+ holders, $250K+) aren't blocked for concentration. Never listed: rugged coins, devs who can still mint or freeze, bot trading, and big wallets unloading into buys.</p>
     <p class="igrules igrec" id="igRecord"></p>
   </div>
   <div class="igbody" id="igBody"><div class="igempty"><b>Warming up…</b><span>Live 30s–5m price checks need about a minute of data.</span></div></div>
+  <div class="igfoot" id="ctoBody"></div>
 </section>
 
-<section class="ignite cto" id="cto" aria-label="Community takeovers">
-  <div class="ighead">
-    <div class="igtitle"><h2>Community Takeovers</h2><span class="igtag">CTO</span><span class="igcount" id="ctoCount"></span></div>
-    <p class="igrules">Coins whose community took over after the dev left, newest claim first. Takeovers are checked every 30 seconds so you see them as early as possible. A takeover only lists if it's real: claimed at least 24 hours after the coin launched (not a fresh coin buying a CTO badge), fewer than 10 linked insider wallets, and a creator who isn't a serial launcher. Then it needs real backing: at least $25K market cap, solid hourly volume, more dollars buying than selling, more new buyers than sellers, holders growing, price not bleeding, and a community actually paying attention (Buzz 20+: Crypto Twitter likes, new holders, traders, Telegram calls and members). Coins where every buy gets sold into, and red-flag coins, are left off. A takeover is a community signal, not a safety check, so tap a coin for its full safety report.</p>
-  </div>
-  <div class="igbody" id="ctoBody"><div class="igempty"><b>Warming up…</b><span>Loading the latest community takeovers.</span></div></div>
-</section>
 
 <footer class="foot">
   <div class="legend"><span><i class="lg g"></i>Clean</span><span><i class="lg a"></i>Caution</span><span><i class="lg r"></i>Red flag</span><span><i class="lg o"></i>Organic (clean + real traders, no insiders, LP locked)</span><span class="muted">Tap any coin for chart, all-time high, origin and full safety details.</span></div>
@@ -117,6 +111,7 @@
       <button class="tool exitfs" id="exitFs" aria-label="Exit full screen"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
       <div class="chartmsg" id="chartMsg" hidden></div>
     </div>
+    <div class="tstatus" id="dTop"></div>
     <section class="card heatcard" id="dHeat"></section>
     <section class="card" id="dSafety"></section>
     <section class="card" id="dAbout"></section>
