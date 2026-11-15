@@ -1014,28 +1014,35 @@ window.HCRun = IG.run;
 function igLoad() { try { const o = JSON.parse(localStorage.getItem('hc_ig') || '{}'); const cut = Date.now() - 48 * 3600e3; for (const k in o) if (!(o[k].t0 > cut)) delete o[k]; return o; } catch { return {}; } }
 function igSave() { try { localStorage.setItem('hc_ig', JSON.stringify(IG.log)); } catch {} }
 const clamp01 = (x) => (x > 1 ? 1 : x > 0 ? x : 0);
-// Market-cap sweet spot: $40K–$120K gets the biggest boost; big caps need much more to rank.
-const igZone = (mc) => (mc < 25e3 ? 0 : mc < 40e3 ? 0.9 : mc <= 120e3 ? 1.25 : mc <= 300e3 ? 1.05 : mc <= 1e6 ? 0.9 : mc <= 5e6 ? 0.72 : 0.55);
-const IG_PH = { first: 'First run', brk: 'Breakout', reb: 'Confirmed rebound', ext: 'Extended' };
+// No market-cap preference above $40K: a confirmed run at any size competes on equal terms.
+const igZone = (mc) => (mc < 25e3 ? 0 : mc < 40e3 ? 0.9 : 1);
+// Concentration limit scales with size (insiders counted): 20% under $100K, 25% at $250K, 30% at $500K+.
+const igConcLim = (mc) => (mc <= 100e3 ? 20 : mc <= 250e3 ? 20 + 5 * (mc - 100e3) / 150e3 : mc <= 500e3 ? 25 + 5 * (mc - 250e3) / 250e3 : 30);
+const IG_PH = { run: 'Confirmed run', first: 'First run', brk: 'Breakout', reb: 'Confirmed rebound', ext: 'Extended' };
 
 function igPhase(t, p, r) {
   if (!r || r.pending || r.failed || !r.n) return null;
   const fromLo = r.lo72 ? t.p / r.lo72 : 1;
+  // Confirmed run, at any market cap, ranks highest: green on the hour and 6 hours, pushing at or near
+  // its 7-day high, a higher low under it, buyers in control and more new buyers than sellers.
+  const nearHi = r.hi ? t.p >= r.hi * 0.8 : false;
+  const higherLow = r.lo6 && r.lo72 && r.lo6 >= r.lo72 * 1.05;
+  const confirmed = (p.h1 || 0) >= 8 && (p.h6 || 0) >= 20 && p.trend >= 0.4 && p.short >= 0.3 && p.buying >= 0.55 && (t.nb?.h1 || 0) > 0 && nearHi && higherLow;
+  if (confirmed) return fromLo >= 20 ? { k: 'ext', m: 0.7 } : { k: 'run', m: 1.3 };
   // "Already ran" = a 4x+ move before the last 3 hours, or sitting 66%+ under an earlier high
   // (launched at the top and bled out). Either way it has to prove the bottom first.
   const ran = r.preRun >= 4 || (r.preHi && r.preHi >= t.p * 3);
   if (!ran) {
     // Hasn't had a big move before this one. Already 8x off the floor or +600% on the day = late.
     if (fromLo >= 8 || (p.h24 || 0) >= 600) return { k: 'ext', m: 0.55 };
-    return { k: 'first', m: fromLo <= 3 ? 1.25 : 1.05 };
+    return { k: 'first', m: fromLo <= 3 ? 1.1 : 1.0 };
   }
   // Already ran once. Reclaiming the old highs with strong buying counts as a breakout.
-  if (r.preHi && t.p >= r.preHi * 0.85) return p.short >= 0.4 && p.buying >= 0.55 ? { k: 'brk', m: 0.85 } : { k: 'no', m: 0 };
+  if (r.preHi && t.p >= r.preHi * 0.85) return p.short >= 0.4 && p.buying >= 0.55 ? { k: 'brk', m: 1.2 } : { k: 'no', m: 0 };
   // Otherwise it's a rebound and has to prove the bottom is in: a higher low over the last 6 hours,
   // 30%+ off the 3-day floor, green on the hour and 6 hours, pushing now with net buyers.
-  const higherLow = r.lo6 && r.lo72 && r.lo6 >= r.lo72 * 1.08;
-  const conf = higherLow && fromLo >= 1.3 && (p.h1 || 0) >= 10 && (p.h6 || 0) >= 0 && p.short >= 0.4 && p.buying >= 0.55 && (t.nb?.h1 || 0) > 0;
-  return conf ? { k: 'reb', m: 0.7 } : { k: 'no', m: 0 };
+  const conf = r.lo6 && r.lo72 && r.lo6 >= r.lo72 * 1.08 && fromLo >= 1.3 && (p.h1 || 0) >= 10 && (p.h6 || 0) >= 0 && p.short >= 0.4 && p.buying >= 0.55 && (t.nb?.h1 || 0) > 0;
+  return conf ? { k: 'reb', m: 0.85 } : { k: 'no', m: 0 };
 }
 // Cheap checks on data we already have. Returns the heat parts if the coin is worth a deeper look.
 function igPre(t) {
@@ -1045,7 +1052,7 @@ function igPre(t) {
   if (t.ol === 'low') return null;
   if (t.dev != null && t.dev >= 3) return null;
   if (t.aud && (!t.mintOff || !t.frzOff)) return null;
-  if (t.top != null && t.top >= 30) return null;
+  if (t.top != null && t.top >= igConcLim(t.mc) + 10) return null;
   if (t.hold != null && t.hold < 150) return null;
   const p = MH.parts(t, 'green');
   if (p.dead || p.stale || p.dumping || p.bot || p.botChurn) return null;
@@ -1061,7 +1068,8 @@ function igCheck(t, p) {
   const rk = S.risk.get(t.a);
   if (!rk || rk.pending) return 'wait';
   if (rk.failed || rk.top10 == null) return 'norisk';
-  if (rk.top10 >= 20 || (rk.ins || 0) >= 5 || (rk.insN || 0) > 2 || (rk.cre || 0) >= 3) return 'conc';
+  const lim = igConcLim(t.mc);
+  if (rk.top10 >= lim || (rk.ins || 0) >= 5 || (rk.insN || 0) > 2 || (rk.cre || 0) >= 3) return 'conc';
   if (rk.risks?.some((x) => /rugged/i.test(x.n))) return 'rug';
   const curve = t.f.some((x) => x.k === 'curve');
   if (!curve && rk.lp != null && rk.lp < 50) return 'lp';
@@ -1073,7 +1081,7 @@ function igCheck(t, p) {
   if (!info || info.pending) return 'wait';
   const desc = String(info.desc || '').trim();
   if (info.failed || desc.length < 20 || !(info.website || info.twitter)) return 'desc';
-  const conc = clamp01((20 - rk.top10) / 15);
+  const conc = clamp01((lim - rk.top10) / 15);
   const spread = 1 - Math.exp(-(info.holders || t.hold || 0) / 500);
   const insF = 1 - Math.min(rk.ins || 0, 5) / 10;
   const qual = 0.4 * p.organic + 0.25 * spread + 0.2 * conc + 0.15 * insF;
