@@ -158,7 +158,7 @@ function heatOf(t) {
 }
 MH.onUpdate = () => { render(); if (openMint) paintDrawer(); };
 // Keep scanner-only fields (social signals) when a faster price refresh replaces a row.
-function keep(t) { const prev = S.tokens.get(t.a); if (prev && prev.so && !t.so) t.so = prev.so; if (prev && prev.ct && !t.ct) t.ct = prev.ct; return t; }
+function keep(t) { const prev = S.tokens.get(t.a); if (prev && prev.so && !t.so) t.so = prev.so; if (prev && prev.tr && !t.tr) t.tr = prev.tr; if (prev && prev.ct && !t.ct) t.ct = prev.ct; return t; }
 
 // ---------- Derived ----------
 const ratio = (t) => (t.mc ? (t.v[S.win] || 0) / t.mc : 0);
@@ -1004,6 +1004,34 @@ segInit('#unitSeg', 'unit', 'u', () => { if (chart) { setChartData(); centerChar
 $('#fsBtn').onclick = () => setFull(!$('#chartWrap').classList.contains('full'));
 $('#exitFs').onclick = () => setFull(false);
 
+// ---------- Buzz: is the community actually paying attention? ----------
+// Social arbitrage: runs like WASTED are driven by people caring. Built from free signals:
+//   CT attention   Jupiter's Crypto Twitter likes, smart-account likes weighted 10x (30%)
+//   holder growth  % new holders in the last hour (25%)
+//   traders        unique traders in the last hour (20%)
+//   calls          Telegram calls, CTO claim, DexScreener boost or profile in the last few hours (15%)
+//   Telegram       members in the coin's own Telegram, once its profile has loaded (10%)
+const sat = (x, k) => (x > 0 ? 1 - Math.exp(-x / k) : 0);
+function buzzOf(t) {
+  const info = S.info.get(t.a);
+  const ct = sat((t.ctl || 0) + 10 * (t.sctl || 0), 120);
+  const hold = sat(t.hc?.h1 || 0, 4);
+  const trad = sat(t.tr?.h1 || 0, 400);
+  const so = t.so || {}, fresh = (m) => (m != null && m <= 180 ? 1 - m / 240 : 0);
+  const calls = Math.min(1, 0.6 * fresh(so.tg) + 0.5 * fresh(so.c) + 0.25 * fresh(so.p) + 0.15 * fresh(so.b));
+  const tg = sat(info?.tgMembers || 0, 1500);
+  const s = Math.round(100 * (0.3 * ct + 0.25 * hold + 0.2 * trad + 0.15 * calls + 0.1 * tg));
+  const why = [];
+  if (t.sctl) why.push(`${t.sctl} smart CT likes`);
+  if (t.ctl) why.push(`${t.ctl} CT likes`);
+  if ((t.hc?.h1 || 0) > 0) why.push(`holders +${t.hc.h1}% 1h`);
+  if (t.tr?.h1) why.push(`${t.tr.h1} traders 1h`);
+  if (so.tg != null) why.push(`TG call ${so.tg}m ago`);
+  if (info?.tgMembers) why.push(`${info.tgMembers.toLocaleString()} in Telegram`);
+  return { s, why };
+}
+const BUZZ_MIN = 20;
+
 // ---------- Igniting Top 10 ----------
 // The strict list: coins moving right now that are as clean and spread out as we can verify, weighted
 // toward the $40K–$120K zone and toward a coin's FIRST run. Coins that already ran only make it as a
@@ -1104,8 +1132,10 @@ function igCheck(t, p) {
   const qual = 0.4 * p.organic + 0.25 * spread + 0.2 * conc + 0.15 * insF;
   // Soft cap so the very best spread out instead of all reading 99.
   const raw = 100 * igMom(p) * (0.55 + 0.45 * qual) * igZone(t.mc) * ph.m;
-  const s = 100 * (1 - Math.exp(-raw / 60));
-  return { s, p, ph, rk, info, desc };
+  const bz = buzzOf(t);
+  if (bz.s < BUZZ_MIN) return 'buzz';
+  const s = 100 * (1 - Math.exp(-(raw * (0.7 + 0.6 * bz.s / 100)) / 60));
+  return { s, p, ph, rk, info, desc, bz };
 }
 // Run histories are fetched through a small queue (3 at a time) so every shortlisted coin is ready
 // by the next 10-second refresh without hammering the rate-limited chart source.
@@ -1190,7 +1220,7 @@ function paintIgnite() {
     const best = L && L.p0 ? (L.hi / L.p0 - 1) * 100 : null;
     const hold = r.info.holders || t.hold;
     const os = t.os != null ? `Organic ${t.os}` : '';
-    const chips = [`Top 10 hold ${Math.round(r.rk.top10)}%`, `Insiders ${(r.rk.ins || 0).toFixed(1)}%`, hold ? `${Math.round(hold).toLocaleString()} holders` : '', os].filter(Boolean);
+    const chips = [`Buzz ${r.bz.s}`, `Top 10 hold ${Math.round(r.rk.top10)}%`, `Insiders ${(r.rk.ins || 0).toFixed(1)}%`, hold ? `${Math.round(hold).toLocaleString()} holders` : '', os].filter(Boolean);
     return `<button class="igrow" data-a="${esc(t.a)}">
       <span class="igrk">${i + 1}</span>
       <span class="igav">${av}</span>
@@ -1243,12 +1273,14 @@ function ctoBacked(t) {
   if (t.hc?.h1 != null && t.hc.h1 < 0) return false;
   if ((t.c.h1 ?? 0) <= -8) return false;
   if (unloading(t)) return false;
+  if (buzzOf(t).s < BUZZ_MIN) return false;
   return true;
 }
 const ctoAge = (m) => (m < 60 ? Math.max(1, m) + 'm' : m < 1440 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : Math.floor(m / 1440) + 'd ' + Math.floor((m % 1440) / 60) + 'h');
 function paintCto() {
   const box = $('#ctoBody');
   if (!box || !S.tokens.size) return;
+  for (const t of S.tokens.values()) if (t.ct && !S.info.has(t.a)) { S.info.set(t.a, { pending: true }); api('/api/info?a=' + t.a).then((d) => S.info.set(t.a, d)).catch(() => S.info.set(t.a, { failed: true })); }
   const list = ctoList();
   window.__ctoN = list.length;
   const jb = document.querySelector('#jump .jcto span');
@@ -1274,8 +1306,10 @@ function paintCto() {
     const rk = S.risk.get(t.a);
     const h = Math.round(heatOf(t));
     const bs = t.bs?.h1;
+    const bz = buzzOf(t);
     const chips = [
       GRADE_TXT[g],
+      `Buzz ${bz.s}` + (bz.why.length ? ' · ' + bz.why.slice(0, 2).join(', ') : ''),
       bs ? `1h buys ${fmtUsd(bs[0])} vs sells ${fmtUsd(bs[1])}` : '',
       t.nb?.h1 > 0 ? `+${t.nb.h1} net buyers 1h` : '',
       t.hold ? `${Math.round(t.hold).toLocaleString()} holders` : '',

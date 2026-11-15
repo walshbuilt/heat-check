@@ -286,6 +286,9 @@ export async function withJupiter(rows) {
     if (first && (!r.age || first < r.age)) r.age = first;
     if (!r.img && j.icon) r.img = j.icon;
     if (n(j.holderCount)) r.hold = n(j.holderCount);
+    // Crypto Twitter attention (Jupiter): likes on posts about the coin, and likes from tracked smart accounts.
+    if (n(j.ctLikes) != null) r.ctl = n(j.ctLikes);
+    if (n(j.smartCtLikes) != null) r.sctl = n(j.smartCtLikes);
     r.src = 'jup';
     r.f = flags(r);
     r.g = grade(r.f);

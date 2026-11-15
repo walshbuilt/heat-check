@@ -29,7 +29,19 @@ export default async function handler(req, res) {
   const rcTop10 = holders.slice(0, 10).reduce((s, h) => s + (num(h.pct) || 0), 0);
   const lpLocked = Array.isArray(rc?.markets) && rc.markets.length
     ? Math.max(...rc.markets.map((m) => num(m?.lp?.lpLockedPct) || 0)) : num(rc?.lpLockedPct);
+  // Members of the coin's own Telegram, read from its public t.me page (free, no API key).
+  let tgMembers = null;
+  const tgLink = pf?.telegram || dsSoc('telegram');
+  const tgName = (String(tgLink || '').match(/t(?:elegram)?\.me\/([A-Za-z0-9_]{4,40})\/?$/) || [])[1];
+  if (tgName) {
+    try {
+      const r = await fetch(`https://t.me/${tgName}`, { signal: AbortSignal.timeout(4000), headers: { 'user-agent': 'HeatCheck/1.0' } });
+      const m = r.ok ? (await r.text()).match(/tgme_page_extra">\s*([\d\s,]+)\s+(?:members|subscribers)/i) : null;
+      if (m) tgMembers = Number(m[1].replace(/[\s,]/g, '')) || null;
+    } catch {}
+  }
   const out = {
+    tgMembers,
     a,
     desc: String(pf?.description || rc?.fileMeta?.description || gt?.description || '').trim().slice(0, 900),
     categories: Array.isArray(gt?.categories) ? gt.categories.slice(0, 5) : [],
