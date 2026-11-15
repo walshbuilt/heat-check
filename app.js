@@ -1079,7 +1079,7 @@ const BUZZ_MIN = 20;
 // toward the $40K–$120K zone and toward a coin's FIRST run. Coins that already ran only make it as a
 // confirmed rebound (higher low, back above the floor, buyers in control) or a breakout over old highs.
 // Every coin needs a full RugCheck report, run history and a real description before it can list.
-const IG = { run: new Map(), seen: new Map(), log: igLoad(), at: 0, fetching: 0, scanned: 0, listed: [], fill: [] };
+const IG = { run: new Map(), seen: new Map(), log: igLoad(), at: 0, fetching: 0, scanned: 0, listed: [], fill: [], fillSince: new Map() };
 window.HCRun = IG.run;
 function igLoad() { try { const o = JSON.parse(localStorage.getItem('hc_ig') || '{}'); const cut = Date.now() - 48 * 3600e3; for (const k in o) if (!(o[k].t0 > cut)) delete o[k]; return o; } catch { return {}; } }
 function igSave() { try { localStorage.setItem('hc_ig', JSON.stringify(IG.log)); } catch {} }
@@ -1232,6 +1232,41 @@ function igCheck(t, p) {
   const s = 100 * (1 - Math.exp(-(raw * (0.7 + 0.6 * bz.s / 100)) / 60));
   return { s, p, ph, rk, info, desc, bz, prod, com };
 }
+const SMALL_MC = 100e3, SMALL_MAX = 3;
+// Overall quality for the Running part of the board: the heat score (short-term price, buying,
+// organic activity, volume) blended with the measured 15-minute gain, then adjusted for safety,
+// how many holders it has and its size.
+function runScore(t) {
+  const g = gradeOf(t), h = heatOf(t), m = mv15(t);
+  const gain = 100 * (m > 0 ? 1 - Math.exp(-m / 40) : 0);
+  const hold = S.info.get(t.a)?.holders || t.hold || 0;
+  const safe = g === 'green' ? (isOrganic(t) ? 1.12 : 1) : g === 'amber' ? 0.85 : 0.6;
+  const com = igCommunity(t) ? 1.1 : 1;
+  const size = t.mc < SMALL_MC ? 0.8 : 1;
+  return (0.55 * h + 0.45 * gain) * safe * com * size * (0.8 + 0.2 * (1 - Math.exp(-hold / 1500)));
+}
+// A coin already on the board stays unless something serious changes: a hard rug signal, it stops
+// trading, selling takes over, or bot trading.
+function keepWhy(t) {
+  const hb = hardBlock(t);
+  if (hb) return hb;
+  const p = MH.parts(t, gradeOf(t));
+  if (p.dead || p.stale) return 'stopped trading';
+  if (p.dumping) return 'selling took over';
+  if (p.bot || p.botChurn) return 'bot trading';
+  if (mv15(t) < -8) return 'falling';
+  return '';
+}
+// The coin's current move, in plain words: Igniting, Running, Recovering (rebound), or Cooling.
+function stageOf(t) {
+  const st = MH.stage(t);
+  if (st.l) return st;
+  const m5 = t.c.m5 || 0, h1 = t.c.h1 || 0, m = mv15(t);
+  if (h1 < -5 && m5 > 2) return { k: 'rec', l: 'Rebound' };
+  if (m > 5 && m5 > 3) return { k: 'ign', l: 'Igniting' };
+  if (m > 0 || h1 > 5) return { k: 'run', l: 'Running' };
+  return { k: 'cool', l: 'Cooling' };
+}
 // Running now: fills the Top 10 under the Igniting coins. Anything moving up over the last 15 minutes
 // with real volume and no hard rug signal, whatever its safety grade (the grade is shown on the row).
 // Red-flag coins need to be at least a day old.
@@ -1327,13 +1362,36 @@ function igTick() {
     rows.push([t, sn]);
   }
   rows.sort((x, y) => y[1].r.s - x[1].r.s);
-  IG.listed = rows.slice(0, 10);
-  // Fill the rest of the ten with coins that are running, biggest 15-minute gain first.
+  // Small caps (under $100K) run often but would crowd the board, so at most 3 are on it at a time.
+  const small = (t) => t.mc < SMALL_MC;
+  let nSmall = 0;
+  IG.listed = [];
+  for (const row of rows) { if (IG.listed.length >= 10) break; if (small(row[0])) { if (nSmall >= SMALL_MAX) continue; nSmall++; } IG.listed.push(row); }
+  // Fill the rest of the ten with the best coins that are running, by overall quality (runScore).
+  // The board is sticky: a coin that's on it stays while it still qualifies and keeps a fair rank
+  // (it gets a 30% edge over newcomers, and holds at least 3 minutes), so the ten shift around
+  // instead of turning over every refresh.
   const have = new Set(IG.listed.map((x) => x[0].a));
   const cand = [];
-  for (const t of S.tokens.values()) if (!have.has(t.a) && !runWhy(t)) cand.push(t);
-  cand.sort((x, y) => mv15(y) - mv15(x));
-  IG.fill = cand.slice(0, 10 - IG.listed.length);
+  for (const t of S.tokens.values()) {
+    if (have.has(t.a)) continue;
+    const on = IG.fillSince.has(t.a);
+    if (on ? keepWhy(t) : runWhy(t)) continue;
+    const held = on ? now - IG.fillSince.get(t.a) : 0;
+    cand.push([t, runScore(t) * (on ? 1.3 : 1) + (on && held < 180e3 ? 1000 : 0)]);
+  }
+  cand.sort((x, y) => y[1] - x[1]);
+  IG.fill = [];
+  for (const [t] of cand) {
+    if (IG.listed.length + IG.fill.length >= 10) break;
+    if (small(t)) { if (nSmall >= SMALL_MAX) continue; nSmall++; }
+    IG.fill.push(t);
+  }
+  // Show the fill in order of quality (the 3-minute hold only decides who stays, not the order).
+  IG.fill.sort((x, y) => runScore(y) - runScore(x));
+  const keepSet = new Set(IG.fill.map((t) => t.a));
+  for (const a of [...IG.fillSince.keys()]) if (!keepSet.has(a)) IG.fillSince.delete(a);
+  for (const t of IG.fill) if (!IG.fillSince.has(t.a)) IG.fillSince.set(t.a, now);
   fillFetch(IG.fill);
   window.__igN = IG.listed.length + IG.fill.length;
   let dirty = false;
@@ -1362,48 +1420,52 @@ function paintIgnite() {
     setHTML(box, `<div class="igempty"><b>Nothing is running right now.</b><span>Watching ${IG.scanned} coins.</span></div>`);
     return;
   }
-  const fillHTML = (IG.fill.length ? `<div class="igdiv"><b>Running now</b><span>Up over the last 15 minutes with real volume, biggest gain first. Not fully vetted: check each label.</span></div>` : '') + IG.fill.map((t, i) => {
-    const img = safeUrl(t.img), g = gradeOf(t), c15 = chg15(t), mv = c15 != null ? c15 : t.c.m5, why = topWhy(t);
-    const av = img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="ph">${esc((t.s || '?').slice(0, 2))}</span>`;
-    const lab = g === 'green' ? 'Clean' : (g === 'amber' ? 'Caution' : 'High risk') + (why ? ': ' + why : '');
+  const moves = (t) => { const c15 = chg15(t); return `<span class="igmv"><span class="${cls(t.c.m5)}">5m ${fmtMove(t.c.m5)}</span><span class="${cls(c15)}">15m ${c15 == null ? '—' : fmtMove(c15)}</span><span class="${cls(t.c.h1)}">1h ${fmtMove(t.c.h1)}</span></span>`; };
+  // Safety tags first, in capitals (CLEAN, ORGANIC, CAUTION, HIGH RISK); the warning in normal text;
+  // then holders, Buzz, product and age in yellow.
+  const tags = (t, extra) => {
+    const g = gradeOf(t), why = topWhy(t);
+    const out = [`<i class="tag g-${g}">${g === 'green' ? 'CLEAN' : g === 'amber' ? 'CAUTION' : 'HIGH RISK'}</i>`];
+    if (g === 'green' && isOrganic(t)) out.push('<i class="tag g-org">ORGANIC</i>');
+    if (g !== 'green' && why) out.push(`<i class="warn g-${g}">${esc(why)}</i>`);
+    if (igCommunity(t)) out.push('<i class="tag g-com">COMMUNITY</i>');
     const hold = S.info.get(t.a)?.holders || t.hold, prod = productOf(t);
-    const chips = [hold ? `${Math.round(hold).toLocaleString()} holders` : '', t.os != null ? `Organic ${t.os}` : '', `Buzz ${buzzOf(t).s}`, prod, igCommunity(t) ? 'Community coin' : '', t.age ? `Age ${fmtAge(t.age)}` : ''].filter(Boolean);
+    const y = [hold ? `${Math.round(hold).toLocaleString()} holders` : '', `Buzz ${buzzOf(t).s}`, prod, t.age ? `Age ${fmtAge(t.age)}` : ''].filter(Boolean);
+    return out.join('') + y.map((c) => `<i class="yl">${esc(c)}</i>`).join('') + (extra || []).filter(Boolean).map((c) => `<i>${esc(c)}</i>`).join('');
+  };
+  const av = (t) => { const img = safeUrl(t.img); return img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="ph">${esc((t.s || '?').slice(0, 2))}</span>`; };
+  const heatBox = (t) => `<span class="igscore"><b>${Math.round(heatOf(t))}</b><small>heat</small></span>`;
+  const fillHTML = (IG.fill.length ? `<div class="igdiv"><b>Running now</b><span>The best coins moving right now, by heat score, 15-minute gain, safety and holders. Check each label.</span></div>` : '') + IG.fill.map((t, i) => {
+    const st = stageOf(t);
     return `<button class="igrow runrow" data-a="${esc(t.a)}">
       <span class="igrk">${IG.listed.length + i + 1}</span>
-      <span class="igav">${av}</span>
+      <span class="igav">${av(t)}</span>
       <span class="igmain">
-        <span class="igl1"><b>${esc(t.s)}</b><span class="igmc">${fmtUsd(t.mc)}</span></span>
-        <span class="igchips"><i class="g-${g}">${esc(lab)}</i>${chips.map((c) => `<i>${esc(c)}</i>`).join('')}</span>
+        <span class="igl1"><b>${esc(t.s)}</b><span class="igph ${st.k}">${st.l}</span><span class="igmc">${fmtUsd(t.mc)}</span></span>
+        <span class="igchips">${tags(t, [t.os != null ? `Organic score ${t.os}` : ''])}</span>
       </span>
-      <span class="igside">
-        <span class="igscore"><b class="${cls(mv)}">${fmtPct(mv)}</b><small>${c15 != null ? '15 min' : '5 min'}</small></span>
-        <span class="igmv"><span class="${cls(t.c.m5)}">5m ${fmtMove(t.c.m5)}</span><span class="${cls(t.c.h1)}">1h ${fmtMove(t.c.h1)}</span></span>
-      </span>
+      <span class="igside">${heatBox(t)}${moves(t)}</span>
     </button>`;
   }).join('');
-  setHTML(box, IG.listed.map(([t, sn], i) => {
-    const r = sn.r, L = IG.log[t.a], img = safeUrl(t.img);
-    const av = img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="ph">${esc((t.s || '?').slice(0, 2))}</span>`;
+  setHTML(box, (IG.listed.length ? `<div class="igdiv first"><b>Igniting</b><span>At the start of a run and vetted for safety. Target: 3x in 4 hours under $100K, 2x at $100K+.</span></div>` : '') + IG.listed.map(([t, sn], i) => {
+    const r = sn.r, L = IG.log[t.a];
     const since = L && L.p0 ? (t.p / L.p0 - 1) * 100 : null;
-    const best = L && L.p0 ? (L.hi / L.p0 - 1) * 100 : null;
-    const hold = r.info.holders || t.hold;
-    const os = t.os != null ? `Organic ${t.os}` : '';
-    const g = gradeOf(t), tg = L ? igTarget(L.mc0 || 0) : null;
+    const tg = L ? igTarget(L.mc0 || 0) : null;
     const left = L ? IG_WIN_MS - (Date.now() - L.t0) : 0;
     const bestX = L && L.p0 ? (L.hi4 || L.p0) / L.p0 : null;
     const goal = !L ? '' : bestX >= tg ? `Hit ${tg}x target` : left > 0 ? `Target ${tg}x · best ${bestX.toFixed(1)}x · ${left >= 3600e3 ? Math.floor(left / 3600e3) + 'h ' : ''}${Math.floor((left % 3600e3) / 60e3)}m left` : `Missed ${tg}x · best ${bestX.toFixed(1)}x`;
-    const chips = [g === 'amber' ? 'Caution: ' + (topWhy(t) || 'warning flags') : g === 'red' ? 'High risk: ' + (topWhy(t) || 'red flags') : '', r.com ? 'Community coin' : '', productOf(t), `Buzz ${r.bz.s}`, `Top 10 hold ${Math.round(r.rk.top10)}%`, `Insiders ${(r.rk.ins || 0).toFixed(1)}%`, hold ? `${Math.round(hold).toLocaleString()} holders` : '', os].filter(Boolean);
     return `<button class="igrow" data-a="${esc(t.a)}">
       <span class="igrk">${i + 1}</span>
-      <span class="igav">${av}</span>
+      <span class="igav">${av(t)}</span>
       <span class="igmain">
         <span class="igl1"><b>${esc(t.s)}</b><span class="igph ${r.ph.k}">${IG_PH[r.ph.k]}</span><span class="igmc">${fmtUsd(t.mc)}</span></span>
         ${r.desc ? `<span class="igdesc">${esc(r.desc)}</span>` : ''}
-        <span class="igchips">${chips.map((c) => `<i${/^Caution/.test(c) ? ' class="g-amber"' : /^High risk/.test(c) ? ' class="g-red"' : ''}>${esc(c)}</i>`).join('')}</span>
+        <span class="igchips">${tags(t, [`Top 10 hold ${Math.round(r.rk.top10)}%`, `Insiders ${(r.rk.ins || 0).toFixed(1)}%`, t.os != null ? `Organic score ${t.os}` : ''])}</span>
       </span>
       <span class="igside">
-        <span class="igscore"><b>${Math.round(r.s)}</b><small>ignition</small></span>
-        <span class="igmv"><span class="${cls(t.c.m5)}">5m ${fmtMove(t.c.m5)}</span><span class="${cls(t.c.h1)}">1h ${fmtMove(t.c.h1)}</span></span>
+        ${heatBox(t)}
+        ${moves(t)}
+        <span class="igign">Ignition ${Math.round(r.s)}</span>
         ${since != null ? `<span class="igsince ${cls(since)}">${fmtPct(since)} since listed</span>` : ''}
         ${goal ? `<span class="iggoal${bestX >= tg ? ' hit' : ''}">${esc(goal)}</span>` : ''}
       </span>
