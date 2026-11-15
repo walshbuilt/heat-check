@@ -47,6 +47,16 @@ export default async function handler(req, res) {
     if (creatorPct >= 8) add('danger', `Creator holds ${creatorPct.toFixed(1)}%`, 'The wallet that created the coin still holds a large share.');
     else if (creatorPct >= 3) add('warn', `Creator holds ${creatorPct.toFixed(1)}%`, 'The wallet that created the coin still holds some supply.');
     if (j.rugged) add('danger', 'Marked as rugged', 'RugCheck has flagged this coin as rugged.');
+    // The whole insider network, not just the top holders: wallets RugCheck links to the same funding source.
+    if (out.graph >= 25) add('danger', `${out.graph} linked insider wallets`, 'A large network of wallets funded from the same source. Classic setup for a coordinated dump.');
+    else if (out.graph >= 10) add('warn', `${out.graph} linked insider wallets`, 'A network of wallets funded from the same source.');
+    // Serial launcher: other coins the same creator wallet has made.
+    const made = Array.isArray(j.creatorTokens) ? j.creatorTokens.length : null;
+    if (made != null) {
+      out.devN = made;
+      if (made >= 20) add('danger', `Creator has launched ${made} other coins`, 'Serial launcher. Most coins from wallets like this are pumped and dumped.');
+      else if (made >= 5) add('warn', `Creator has launched ${made} other coins`, 'This creator launches coins often.');
+    }
   }
   send(res, 200, out, 's-maxage=300, stale-while-revalidate=900');
 }

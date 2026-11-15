@@ -279,6 +279,8 @@ export async function withJupiter(rows) {
     const au = j.audit || {};
     if (n(au.topHoldersPercentage) != null) r.top = Math.round(n(au.topHoldersPercentage) * 10) / 10;
     if (n(au.devBalancePercentage) != null) r.dev = Math.round(n(au.devBalancePercentage) * 10) / 10;
+    // How many coins the dev wallet has minted (Jupiter). A high count = serial launcher.
+    if (n(au.devMints) != null) r.devM = n(au.devMints);
     r.aud = Object.keys(au).length > 0;
     r.mintOff = au.mintAuthorityDisabled === true;
     r.frzOff = au.freezeAuthorityDisabled === true;

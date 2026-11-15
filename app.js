@@ -1092,6 +1092,7 @@ function igPre(t) {
   if (t.f.some((x) => BOT_FLAGS.has(x.k))) return null;
   if (t.ol === 'low') return null;
   if (t.dev != null && t.dev >= igIns(t.mc).dev) return null;
+  if ((t.devM || 0) >= 5) return null;
   if (unloading(t)) return null;
   if (t.aud && (!t.mintOff || !t.frzOff)) return null;
   if (t.top != null && t.top >= igConcLim(t.mc) + 10) return null;
@@ -1114,6 +1115,7 @@ function igCheck(t, p) {
   const il = igIns(t.mc);
   if (rk.top10 >= lim || (rk.ins || 0) >= il.pct || (rk.insN || 0) > il.n || (rk.cre || 0) >= il.dev) return 'conc';
   if (unloading(t)) return 'dump';
+  if ((rk.graph || 0) >= 25) return 'conc';
   if (rk.risks?.some((x) => /rugged/i.test(x.n))) return 'rug';
   const curve = t.f.some((x) => x.k === 'curve');
   if (!curve && rk.lp != null && rk.lp < 50) return 'lp';
@@ -1264,6 +1266,14 @@ function ctoList() {
 // buy gets sold into (price falling while buys come in) doesn't list.
 function ctoBacked(t) {
   if (!(t.mc >= 25e3)) return false;
+  // A real takeover happens after the dev walks away, not hours after launch. A claim within 24h of the
+  // coin's creation is the dev (or their friends) buying a CTO badge as marketing.
+  const claimAt = Date.now() - t.ct.m * 60e3;
+  if (!t.age || claimAt - t.age < 24 * 3600e3) return false;
+  // Safety report must be in: no big insider network, no serial launcher.
+  const rk = S.risk.get(t.a);
+  if (!rk || rk.pending || rk.failed) return false;
+  if ((rk.graph || 0) >= 10 || (rk.devN || 0) >= 5 || (t.devM || 0) >= 5) return false;
   if ((t.v.h1 || 0) < Math.max(5000, t.mc * 0.03)) return false;
   if ((t.v.m5 || 0) < 300) return false;
   const bs = t.bs?.h1;
@@ -1280,6 +1290,8 @@ const ctoAge = (m) => (m < 60 ? Math.max(1, m) + 'm' : m < 1440 ? Math.floor(m /
 function paintCto() {
   const box = $('#ctoBody');
   if (!box || !S.tokens.size) return;
+  for (const t of S.tokens.values()) if (t.ct && !S.risk.has(t.a) && !riskQ.includes(t.a)) riskQ.unshift(t.a);
+  pumpRisk();
   for (const t of S.tokens.values()) if (t.ct && !S.info.has(t.a)) { S.info.set(t.a, { pending: true }); api('/api/info?a=' + t.a).then((d) => S.info.set(t.a, d)).catch(() => S.info.set(t.a, { failed: true })); }
   const list = ctoList();
   window.__ctoN = list.length;
