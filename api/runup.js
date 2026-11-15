@@ -44,13 +44,14 @@ export default async function handler(req, res) {
       if (d.length) full = false;
     }
     const lowIn = (hrs) => { const s = c.filter((x) => x.t >= now - hrs * 3600); return s.length ? Math.min(...s.map((x) => x.l)) : null; };
+    const c4 = c.find((x) => x.t >= now - 4 * 3600);
     const hiC = c.reduce((m, x) => (x.h > m.h ? x : m), c[0]);
     send(res, 200, {
       a, pool, n: c.length,
       t0: c[0].t, open0: c[0].o,
       hi: hiC.h, hiT: hiC.t,
       preHi, preRun: Math.round(preRun * 100) / 100,
-      lo72: lowIn(72), lo6: lowIn(6), partial: full,
+      lo72: lowIn(72), lo6: lowIn(6), p4: c4 ? c4.o : null, partial: full,
     }, 's-maxage=180, stale-while-revalidate=600');
   } catch (e) {
     send(res, 502, { error: String(e.message || e) }, 'no-store');

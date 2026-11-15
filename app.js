@@ -50,6 +50,7 @@ const S = {
   risk: new Map(),
   info: new Map(),
   ath: new Map(),
+  h4: new Map(),
   site: new Map(),
   prevRank: new Map(),
   topOf: new Map(),
@@ -722,6 +723,7 @@ async function refreshToken() {
     S.tokens.set(a, keep(d.token));
     const ath = S.ath.get(a);
     if (ath && ath.price && d.token.p > ath.price) { S.ath.set(a, { ...ath, price: d.token.p, t: Math.floor(Date.now() / 1000), precision: 'live' }); setAthLine(); }
+    loadH4(d.token);
     paintDrawer();
     liveCandle(d.token);
     if (chartFor !== a) { loadChart(); loadAth(a); }
@@ -729,6 +731,14 @@ async function refreshToken() {
   } catch {}
 }
 
+// 4-hour change and volume for the coin page (the data feeds only give 1h and 6h, so this comes from
+// the coin's own 15-minute candles). Refreshed once a minute while the coin is open.
+function loadH4(t) {
+  const h = S.h4.get(t.a);
+  if (h && Date.now() - h.at < 60e3) return;
+  S.h4.set(t.a, { ...(h || {}), at: Date.now() });
+  api(`/api/h4?a=${t.a}&pool=${t.pair || ''}`).then((d) => { if (!d.error) { S.h4.set(t.a, { ...d, at: Date.now() }); if (openMint === t.a) paintDrawer(); } }).catch(() => {});
+}
 function momentumRead(t, ath) {
   const r1 = t.mc ? t.v.h1 / t.mc : 0, c1 = t.c.h1 ?? 0, c24 = t.c.h24 ?? 0;
   const ageH = t.age ? (Date.now() - t.age) / 3600e3 : 999;
@@ -783,7 +793,8 @@ function paintDrawer() {
   setHTML($('#dKeys'),
     `<div class="key agek ${ac}"><span>Age</span><b>${fmtAgeLong(born)}</b><small>${born ? 'Since ' + fmtWhen(born) : '&nbsp;'}</small></div>` + athTile + fromTile +
     `<div class="key"><span>Liquidity</span><b>${t.liq ? fmtUsd(t.liq) : 'Curve'}</b><small>${t.liq && t.mc ? (t.liq / t.mc * 100).toFixed(1) + '% of MC' : 'pump.fun bonding curve'}</small></div>`);
-  setHTML($('#dChips'), ['m5', 'h1', 'h6', 'h24'].map((k) => `<div class="chip ${k === S.win ? 'hero' : ''}">Change ${WIN_LABEL[k]}<b class="${cls(t.c[k])}">${fmtMove(t.c[k])}</b></div>`).join(''));
+  const h4 = S.h4.get(t.a), c4 = h4?.p4 && t.p ? (t.p / h4.p4 - 1) * 100 : null;
+  setHTML($('#dChips'), ['m5', 'h1', 'h4', 'h24'].map((k) => { const v = k === 'h4' ? c4 : t.c[k]; return `<div class="chip ${k === S.win ? 'hero' : ''}">Change ${k === 'h4' ? '4h' : WIN_LABEL[k]}<b class="${cls(v)}">${fmtMove(v)}</b></div>`; }).join(''));
   setHTML($('#dHeat'), MH.card(t, esc, g));
 
   // Safety
@@ -835,7 +846,7 @@ function paintDrawer() {
 
   const tx1 = t.tx.h1;
   const st = [
-    ['Vol 5m', fmtUsd(t.v.m5)], ['Vol 1h', fmtUsd(t.v.h1)], ['Vol 6h', fmtUsd(t.v.h6)], ['Vol 24h', fmtUsd(t.v.h24)],
+    ['Vol 5m', fmtUsd(t.v.m5)], ['Vol 1h', fmtUsd(t.v.h1)], ['Vol 4h', h4?.v4 != null ? fmtUsd(h4.v4) : '—'], ['Vol 24h', fmtUsd(t.v.h24)],
     ['Heat 1h', fmtRatio(t.mc ? t.v.h1 / t.mc : 0)], ['Heat 24h', fmtRatio(t.mc ? t.v.h24 / t.mc : 0)], ['Buys / sells 1h', `${tx1.b} / ${tx1.s}`], ['Heat score', Math.round(heatOf(t)) + '%'],
   ];
   setHTML($('#dStats'), st.map(([k, v]) => `<div class="stat"><span>${k}</span><b>${esc(v)}</b></div>`).join(''));
@@ -846,7 +857,7 @@ function paintDrawer() {
     ...[info?.website, ...(t.web || [])].filter(Boolean).slice(0, 1).map((u) => [u, 'Website']),
     ...(t.soc || []).map((s) => [s.u, /twitter/i.test(s.t || '') ? 'X' : String(s.t || 'Link').replace(/^./, (x) => x.toUpperCase())]),
   ].filter(([u]) => safeUrl(u));
-  setHTML($('#dLinks'), `<button data-copy="${esc(t.a)}">Copy contract</button>` + links.map(([u, l]) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(l)}</a>`).join(''));
+  setHTML($('#dLinks'), `<button data-copy="${esc(t.a)}">Copy contract</button>` + links.map(([u, l]) => `<a class="lk-${esc(l.toLowerCase().replace(/[^a-z]/g, ''))}" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(l)}</a>`).join(''));
 }
 
 // ---------- Chart ----------
@@ -1064,6 +1075,20 @@ function unloading(t) {
   if (nb > 0 && ns > 0 && sv / ns >= 3 * (bv / nb) && sv >= bv * 0.8) return true;
   return false;
 }
+// What counts as a good call, measured over the 4 hours after a coin lists: 3x if it listed under
+// $100K market cap, 2x at $100K and up.
+const IG_WIN_MS = 4 * 3600e3;
+const igTarget = (mc0) => (mc0 < 100e3 ? 3 : 2);
+function igRecord() {
+  let done = 0, wins = 0, open = 0;
+  for (const k in IG.log) {
+    const L = IG.log[k];
+    if (!L.p0) continue;
+    const hit = (L.hi4 || L.p0) / L.p0 >= igTarget(L.mc0 || 0);
+    if (hit) { wins++; done++; } else if (Date.now() - L.t0 >= IG_WIN_MS) done++; else open++;
+  }
+  return { done, wins, open };
+}
 const IG_PH = { run: 'Confirmed run', start: 'Run starting', brk: 'Breakout', ext: 'Late in run' };
 
 function igPhase(t, p, r) {
@@ -1078,7 +1103,8 @@ function igPhase(t, p, r) {
   const higherLow = r.lo6 && r.lo72 && r.lo6 >= r.lo72 * 1.05;
   // Confirmed run: green on the hour and 6 hours, at or near its 7-day high, a higher low underneath.
   // Best when it's still early in the move (under 2x off the 6-hour low).
-  if ((p.h1 || 0) >= 8 && (p.h6 || 0) >= 20 && p.trend >= 0.4 && nearHi && higherLow) return { k: 'run', m: off6 <= 2 ? 1.3 : 1.1 };
+  const h4 = r.p4 ? (t.p / r.p4 - 1) * 100 : (p.h6 || 0);
+  if ((p.h1 || 0) >= 8 && h4 >= 20 && p.trend >= 0.4 && nearHi && higherLow) return { k: 'run', m: off6 <= 2 ? 1.3 : 1.1 };
   // Run starting: just turned up this hour and still close to its 6-hour low.
   if ((p.h1 || 0) >= 3 && off6 <= 1.8) return { k: 'start', m: 1.2 };
   // Breakout: pushing through its 7-day high.
@@ -1086,9 +1112,13 @@ function igPhase(t, p, r) {
   return { k: 'no', m: 0 };
 }
 // Cheap checks on data we already have. Returns the heat parts if the coin is worth a deeper look.
+// Established = $250K+ market cap and at least a day old. Those may list with Caution flags (labeled);
+// newer and smaller coins must be Clean. Red flags never list.
+const igEstablished = (t) => t.mc >= 250e3 && t.age && Date.now() - t.age >= 24 * 3600e3;
 function igPre(t) {
   if (!(t.mc >= 25e3) || !t.p) return null;
-  if (gradeOf(t) !== 'green') return null;
+  const g0 = gradeOf(t);
+  if (g0 === 'red' || (g0 === 'amber' && !igEstablished(t))) return null;
   if (t.f.some((x) => BOT_FLAGS.has(x.k))) return null;
   if (t.ol === 'low') return null;
   if (t.dev != null && t.dev >= igIns(t.mc).dev) return null;
@@ -1097,7 +1127,7 @@ function igPre(t) {
   if (t.aud && (!t.mintOff || !t.frzOff)) return null;
   if (t.top != null && t.top >= igConcLim(t.mc) + 10) return null;
   if (t.hold != null && t.hold < 150) return null;
-  const p = MH.parts(t, 'green');
+  const p = MH.parts(t, g0);
   if (p.dead || p.stale || p.dumping || p.bot || p.botChurn) return null;
   if (p.short < 0.3 || p.buying < 0.5 || p.organic < 0.45) return null;
   if ((t.v.m5 || 0) < Math.max(1500, t.mc * 0.006) || (p.tr5 || 0) < 12) return null;
@@ -1105,6 +1135,7 @@ function igPre(t) {
   if (ageH > 2 && t.os != null && t.os < 55) return null;
   return p;
 }
+window.HCIgWhy = (a) => { const t = S.tokens.get(a); if (!t) return 'not tracked'; const p = igPre(t); if (!p) return 'failed quick checks'; const r = igCheck(t, p); return typeof r === 'string' ? r : 'passes · ' + r.ph.k + ' · score ' + Math.round(r.s); };
 const igMom = (p) => 0.4 * p.short + 0.15 * p.accel + 0.25 * p.buying + 0.2 * p.volume;
 // Full check. Returns { s, p, ph, rk, info } or a string saying what's still missing / failed.
 function igCheck(t, p) {
@@ -1201,8 +1232,13 @@ function igTick() {
   for (const [t, sn] of IG.listed) {
     sn.listed = true;
     const L = IG.log[t.a];
-    if (!L) { IG.log[t.a] = { p0: t.p, mc0: t.mc, t0: now, s: t.s, hi: t.p }; dirty = true; }
+    if (!L) { IG.log[t.a] = { p0: t.p, mc0: t.mc, t0: now, s: t.s, hi: t.p, hi4: t.p }; dirty = true; }
     else if (t.p > L.hi) { L.hi = t.p; dirty = true; }
+  }
+  // Keep grading every call for its 4 hours, even after it drops off the list.
+  for (const k in IG.log) {
+    const L = IG.log[k], t = S.tokens.get(k);
+    if (t && t.p && now - L.t0 < IG_WIN_MS && t.p > (L.hi4 || 0)) { L.hi4 = t.p; dirty = true; }
   }
   if (dirty) igSave();
   paintIgnite();
@@ -1211,6 +1247,8 @@ function paintIgnite() {
   const box = $('#igBody');
   if (!box) return;
   $('#igCount').textContent = IG.listed.length ? `${IG.listed.length} of 10` : '0 of 10';
+  const rec = igRecord(), recEl = $('#igRecord');
+  if (recEl) recEl.textContent = rec.done || rec.open ? 'Calls seen on this device, last 48h: ' + (rec.done ? `${rec.wins} of ${rec.done} finished calls hit target` : 'none finished yet') + (rec.open ? ` · ${rec.open} still in their 4-hour window` : '') + '.' : '';
   if (!IG.listed.length) {
     setHTML(box, `<div class="igempty"><b>Nothing passes the bar right now.</b><span>Watching ${IG.scanned} coins. A coin lists only when it's clean, spread out, has a real description and is moving early.</span></div>`);
     return;
@@ -1222,19 +1260,24 @@ function paintIgnite() {
     const best = L && L.p0 ? (L.hi / L.p0 - 1) * 100 : null;
     const hold = r.info.holders || t.hold;
     const os = t.os != null ? `Organic ${t.os}` : '';
-    const chips = [`Buzz ${r.bz.s}`, `Top 10 hold ${Math.round(r.rk.top10)}%`, `Insiders ${(r.rk.ins || 0).toFixed(1)}%`, hold ? `${Math.round(hold).toLocaleString()} holders` : '', os].filter(Boolean);
+    const g = gradeOf(t), tg = L ? igTarget(L.mc0 || 0) : null;
+    const left = L ? IG_WIN_MS - (Date.now() - L.t0) : 0;
+    const bestX = L && L.p0 ? (L.hi4 || L.p0) / L.p0 : null;
+    const goal = !L ? '' : bestX >= tg ? `Hit ${tg}x target` : left > 0 ? `Target ${tg}x · best ${bestX.toFixed(1)}x · ${left >= 3600e3 ? Math.floor(left / 3600e3) + 'h ' : ''}${Math.round((left % 3600e3) / 60e3)}m left` : `Missed ${tg}x · best ${bestX.toFixed(1)}x`;
+    const chips = [g === 'amber' ? 'Caution: ' + (topWhy(t) || 'warning flags') : '', `Buzz ${r.bz.s}`, `Top 10 hold ${Math.round(r.rk.top10)}%`, `Insiders ${(r.rk.ins || 0).toFixed(1)}%`, hold ? `${Math.round(hold).toLocaleString()} holders` : '', os].filter(Boolean);
     return `<button class="igrow" data-a="${esc(t.a)}">
       <span class="igrk">${i + 1}</span>
       <span class="igav">${av}</span>
       <span class="igmain">
         <span class="igl1"><b>${esc(t.s)}</b><span class="igph ${r.ph.k}">${IG_PH[r.ph.k]}</span><span class="igmc">${fmtUsd(t.mc)}</span></span>
         ${r.desc ? `<span class="igdesc">${esc(r.desc)}</span>` : ''}
-        <span class="igchips">${chips.map((c) => `<i>${esc(c)}</i>`).join('')}</span>
+        <span class="igchips">${chips.map((c) => `<i${/^Caution/.test(c) ? ' class="g-amber"' : ''}>${esc(c)}</i>`).join('')}</span>
       </span>
       <span class="igside">
         <span class="igscore"><b>${Math.round(r.s)}</b><small>ignition</small></span>
         <span class="igmv"><span class="${cls(t.c.m5)}">5m ${fmtMove(t.c.m5)}</span><span class="${cls(t.c.h1)}">1h ${fmtMove(t.c.h1)}</span></span>
-        ${since != null ? `<span class="igsince ${cls(since)}">${fmtPct(since)} since listed${best > 5 ? ` · best ${fmtPct(best)}` : ''}</span>` : ''}
+        ${since != null ? `<span class="igsince ${cls(since)}">${fmtPct(since)} since listed</span>` : ''}
+        ${goal ? `<span class="iggoal${bestX >= tg ? ' hit' : ''}">${esc(goal)}</span>` : ''}
       </span>
     </button>`;
   }).join(''));

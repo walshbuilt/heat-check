@@ -392,3 +392,21 @@ main{padding:10px clamp(12px,3vw,32px) 20px;display:grid;grid-template-columns:r
 .igchips i.g-green{color:#4fe0a8;border-color:rgba(79,224,168,.4)}
 .igchips i.g-amber{color:#ffd166;border-color:rgba(255,209,102,.4)}
 .jump .jcto{color:#8fc8ff;border-color:rgba(127,190,255,.45)!important}
+
+/* Coin page links: one color per destination so they read as buttons */
+.links a,.links button{border-radius:999px;border-width:1.5px;padding:9px 14px;--k:#8fa0b8;color:var(--k);border-color:color-mix(in srgb,var(--k) 55%,transparent);background:color-mix(in srgb,var(--k) 12%,var(--panel))}
+.links a:hover,.links button:hover{background:color-mix(in srgb,var(--k) 22%,var(--panel))}
+.links button{--k:#ffd166}
+.links .lk-dexscreener{--k:#c9d4e3}
+.links .lk-solscan{--k:#b48cff}
+.links .lk-rugcheck{--k:#ff7a7a}
+.links .lk-pumpfun{--k:#4fe0a8}
+.links .lk-jupiter{--k:#b6f04a}
+.links .lk-gmgn{--k:#ffb347}
+.links .lk-website{--k:#7fd4ff}
+.links .lk-x{--k:#e8ecf2}
+.links .lk-telegram{--k:#39b7f0}
+.iggoal{font-size:11px;color:var(--muted)}
+.iggoal.hit{color:#4fe0a8;font-weight:700}
+.igrec{color:#c3cad6}
+.igrec:empty{display:none}
