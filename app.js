@@ -691,7 +691,7 @@ $('#closeSheet').onclick = () => goBack();
 
 // ---------- Coin page ----------
 let openMint = null, tokenTimer = null, candleTimer = null;
-function openToken(a) { setHash(S.openTier, a, true); route(); }
+function openToken(a) { window.HCCrumb && HCCrumb('open coin ' + a.slice(0, 8)); setHash(S.openTier, a, true); route(); }
 function showToken(a) {
   if (openMint === a) return;
   openMint = a;
