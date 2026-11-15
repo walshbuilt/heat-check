@@ -251,7 +251,7 @@ async function scan() {
 }
 let priceBusy = false;
 async function tickPrices() {
-  if (priceBusy || document.hidden || !S.lastScan) return;
+  if (priceBusy || document.hidden || !S.lastScan || (openMint && !S.openTier)) return;
   const addrs = [...new Set([...rowEls.keys()].map((k) => k.split('|')[1]))].filter((a) => a !== openMint).sort();
   if (!addrs.length) return;
   priceBusy = true;
@@ -448,6 +448,10 @@ function explain() {
 
 function render() {
   if (S.tokens.size) $('#loading').hidden = true;
+  // While a coin is open the lists behind it are covered, so they redraw at most every 15 seconds.
+  // Keeps the coin page and chart smooth on slower computers.
+  if (openMint && !S.openTier && S.drawnAt && Date.now() - S.drawnAt < 15000) return;
+  S.drawnAt = Date.now();
   explain();
   groups = new Map(TIERS.map((t) => [t.id, []]));
   // Lists hold still for 12 to 15 seconds at a time so rows can be read and tapped. Between re-ranks a coin
@@ -696,6 +700,7 @@ function showToken(a) {
   if (openMint === a) return;
   openMint = a;
   $('#drawer').classList.add('on'); $('#drawer').setAttribute('aria-hidden', 'false');
+  document.body.classList.add('coin-open');
   document.body.style.overflow = 'hidden';
   scrimSync();
   $('#drawer').querySelector('.dbody').scrollTop = 0;
@@ -726,6 +731,8 @@ function hideToken() {
   clearInterval(tokenTimer); clearInterval(candleTimer);
   setFull(false);
   $('#drawer').classList.remove('on'); $('#drawer').setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('coin-open');
+  S.drawnAt = 0; render();
   if (!S.openTier) document.body.style.overflow = '';
   scrimSync();
 }
