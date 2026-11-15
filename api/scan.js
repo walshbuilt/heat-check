@@ -45,6 +45,34 @@ const JUP = 'https://lite-api.jup.ag/tokens/v2';
 // and when public Telegram channels (env TG_CHANNELS, comma-separated usernames) first post its contract.
 const promo = { b: new Map(), p: new Map(), c: new Map(), tg: new Map() };
 let warm = false;
+// Community takeovers (CTOs): DexScreener's feed carries the real claim time, a description and links.
+// Kept 72h and always tracked, since CTO coins often run for days on community backing.
+const cto = new Map(); // mint -> { at: claim ms, d, x, tg, w }
+const CTO_KEEP = 72 * 3600e3;
+let lastCto = 0;
+function takeCtos(arr) {
+  const now = Date.now();
+  for (const x of Array.isArray(arr) ? arr : []) {
+    if (x?.chainId !== 'solana' || !x.tokenAddress || QUOTE_MINTS.has(x.tokenAddress)) continue;
+    const at = Date.parse(x.claimDate || '') || cto.get(x.tokenAddress)?.at || now;
+    if (now - at > CTO_KEEP) continue;
+    const links = Array.isArray(x.links) ? x.links : [];
+    const find = (re) => { const l = links.find((k) => re.test(`${k?.type || ''} ${k?.label || ''} ${k?.url || ''}`)); return /^https?:\/\//.test(l?.url || '') ? String(l.url).slice(0, 200) : undefined; };
+    cto.set(x.tokenAddress, {
+      at: Math.min(at, now),
+      d: x.description ? String(x.description).replace(/\s+/g, ' ').trim().slice(0, 180) : undefined,
+      x: find(/twitter|x\.com/i), tg: find(/telegram|t\.me/i), w: find(/website|^\s*web/i),
+    });
+    seen.set(x.tokenAddress, now);
+    // The claim time is exact, so it also drives the "Community takeover Xm ago" signal.
+    if (!promo.c.has(x.tokenAddress) || promo.c.get(x.tokenAddress) > at) promo.c.set(x.tokenAddress, at);
+  }
+  for (const [m, c] of cto) if (now - c.at > CTO_KEEP) cto.delete(m);
+}
+async function pullCtos() {
+  lastCto = Date.now();
+  takeCtos(await getJSON(`${DS}/community-takeovers/latest/v1`, { timeout: 4000 }).catch(() => null));
+}
 const TG = String(process.env.TG_CHANNELS || '').split(',').map((x) => x.trim().replace(/^@/, '')).filter((x) => /^[A-Za-z0-9_]{4,40}$/.test(x)).slice(0, 15);
 const MINT_RE = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
 async function tgCalls(ch) {
@@ -108,7 +136,7 @@ async function discover() {
     mints.forEach((m) => { seen.set(m, now); found++; });
     if (i === GT_JOBS || i === GT_JOBS + 1) mark(promo.b, mints, now);
     if (i === GT_JOBS + 2) mark(promo.p, mints, now);
-    if (i === GT_JOBS + 3) mark(promo.c, mints, now);
+    if (i === GT_JOBS + 3) { takeCtos(r); lastCto = now; }
   });
   // Telegram calls: the post time is known, so use it directly; called coins get tracked too.
   tg.flat().forEach(([m, when]) => {
@@ -119,6 +147,7 @@ async function discover() {
   for (const map of Object.values(promo)) for (const [m, t] of map) if (now - t > 12 * 3600e3) map.delete(m);
   warm = true;
   SEEDS.forEach((m) => seen.set(m, now));
+  for (const m of cto.keys()) seen.set(m, now);
   lastDiscover = now;
   return { sources: res.filter(Boolean).length, of: jobs.length, found };
 }
@@ -145,9 +174,12 @@ export default async function handler(req, res) {
     let disc = null;
     if (Date.now() - lastDiscover > DISCOVER_MS || seen.size === 0) disc = await discover();
     if (Date.now() - lastFast > FAST_MS) await fastDiscover().catch(() => {});
+    // New takeovers are checked every 30s: the earlier a CTO is spotted, the better.
+    if (Date.now() - lastCto > FAST_MS) await pullCtos();
+    for (const m of cto.keys()) seen.set(m, Date.now());
     const now = Date.now();
     for (const [m, t] of seen) if (now - t > KEEP_MS) seen.delete(m);
-    const mints = [...seen.entries()].sort((a, b) => (hot.has(b[0]) - hot.has(a[0])) || b[1] - a[1]).slice(0, MAX_TOKENS).map((x) => x[0]);
+    const mints = [...seen.entries()].sort((a, b) => (cto.has(b[0]) - cto.has(a[0])) || (hot.has(b[0]) - hot.has(a[0])) || b[1] - a[1]).slice(0, MAX_TOKENS).map((x) => x[0]);
 
     const chunks = [];
     for (let i = 0; i < mints.length; i += 30) chunks.push(mints.slice(i, i + 30));
@@ -159,6 +191,8 @@ export default async function handler(req, res) {
       const so = {};
       for (const k of ['b', 'p', 'c', 'tg']) { const t = promo[k].get(r.a); if (t != null && now - t < 6 * 3600e3) so[k] = Math.max(0, Math.round((now - t) / 60e3)); }
       if (Object.keys(so).length) rest.so = so;
+      const c = cto.get(r.a);
+      if (c) rest.ct = { m: Math.max(0, Math.round((now - c.at) / 60e3)), d: c.d, x: c.x, tg: c.tg, w: c.w };
       if (hot.has(r.a)) rest.hot5 = Math.max(0, Math.round((now - hot.get(r.a)) / 60e3));
       return rest;
     });

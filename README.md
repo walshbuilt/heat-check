@@ -18,7 +18,7 @@ Live at https://inflection-gold.vercel.app
 |---|---|
 | `heat.js` | The heat score: price ladder (30s to 24h), net buying, organic growth, volume, clean, and safety gates |
 | `api/_lib.js` | Shared data helpers, Jupiter overlay, red-flag rules and grading |
-| `api/scan.js` | Coin discovery (Jupiter 5m/1h lists every 30–90s) and the main coin list |
+| `api/scan.js` | Coin discovery (Jupiter 5m/1h lists every 30–90s), community takeovers (checked every 30s, tracked 72h) and the main coin list |
 | `api/risk.js` | RugCheck safety report with insider and creator holdings |
 | `api/ohlcv.js` | Chart candles with cache and fallback |
 | `ui.js` | Search, paste-a-contract, hottest-coins ticker |

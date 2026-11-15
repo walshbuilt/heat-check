@@ -376,3 +376,17 @@ main{padding:10px clamp(12px,3vw,32px) 20px;display:grid;grid-template-columns:r
 
 .jump .jig{color:#ffb347;border-color:rgba(255,150,50,.45)!important}
 .ignite{scroll-margin-top:90px}
+
+/* Community Takeovers */
+.cto{background:linear-gradient(135deg,rgba(127,212,255,.7),rgba(120,90,255,.45) 45%,rgba(255,255,255,.06));box-shadow:0 10px 40px -18px rgba(90,140,255,.5)}
+.cto .ighead{background:linear-gradient(180deg,rgba(90,160,255,.09),transparent),var(--panel)}
+.cto .igtag{background:linear-gradient(180deg,#bfe8ff,#7fa8ff)}
+.cto .igrk{color:#8fc8ff}
+.cto .igscore b{background:linear-gradient(180deg,#bfe8ff,#7f8cff);-webkit-background-clip:text;background-clip:text}
+.ctoage{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:3px 7px;border-radius:999px;border:1px solid}
+.ctoage.fresh{color:#4fe0a8;border-color:rgba(79,224,168,.45);background:rgba(79,224,168,.08)}
+.ctoage.recent{color:#7fd4ff;border-color:rgba(127,212,255,.45);background:rgba(127,212,255,.08)}
+.ctoage.older{color:var(--muted);border-color:var(--line);background:var(--panel2)}
+.igchips i.g-green{color:#4fe0a8;border-color:rgba(79,224,168,.4)}
+.igchips i.g-amber{color:#ffd166;border-color:rgba(255,209,102,.4)}
+.jump .jcto{color:#8fc8ff;border-color:rgba(127,190,255,.45)!important}

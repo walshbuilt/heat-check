@@ -158,7 +158,7 @@ function heatOf(t) {
 }
 MH.onUpdate = () => { render(); if (openMint) paintDrawer(); };
 // Keep scanner-only fields (social signals) when a faster price refresh replaces a row.
-function keep(t) { const prev = S.tokens.get(t.a); if (prev && prev.so && !t.so) t.so = prev.so; return t; }
+function keep(t) { const prev = S.tokens.get(t.a); if (prev && prev.so && !t.so) t.so = prev.so; if (prev && prev.ct && !t.ct) t.ct = prev.ct; return t; }
 
 // ---------- Derived ----------
 const ratio = (t) => (t.mc ? (t.v[S.win] || 0) / t.mc : 0);
@@ -222,7 +222,7 @@ async function scan() {
     for (const k of [...S.tokens.keys()]) if (!seen.has(k) && k !== openMint) S.tokens.delete(k);
     S.lastScan = Date.now();
     setStatus('live');
-    render(); renderTape();
+    render(); renderTape(); paintCto();
     S.first = false;
     queueRisk();
   } catch { setStatus('err'); } finally { scanBusy = false; }
@@ -445,7 +445,7 @@ function render() {
   if (!dragging) wanted.forEach((id, i) => { const el = tierEls.get(id); if (main.children[i] !== el) main.insertBefore(el, main.children[i] || null); });
   else wanted.forEach((id) => { const el = tierEls.get(id); if (!el.isConnected) main.appendChild(el); });
 
-  setHTML($('#jump'), `<button data-j="ignite" class="jig">Top 10<span>${window.__igN || 0}</span></button>` + wanted.map((id) => `<button data-j="${id}">${TMAP[id].label}<span>${groups.get(id).length}</span></button>`).join(''));
+  setHTML($('#jump'), `<button data-j="ignite" class="jig">Top 10<span>${window.__igN || 0}</span></button><button data-j="cto" class="jcto">CTO<span>${window.__ctoN || 0}</span></button>` + wanted.map((id) => `<button data-j="${id}">${TMAP[id].label}<span>${groups.get(id).length}</span></button>`).join(''));
   const used = new Set();
   const cols = colsHTML();
   for (const id of wanted) {
@@ -507,7 +507,7 @@ function renderTape() {
   track.style.setProperty('--dur', Math.max(30, items.length * 5) + 's');
   track.querySelectorAll('img').forEach((im) => im.addEventListener('error', () => im.remove(), { once: true }));
 }
-$('#jump').addEventListener('click', (e) => { const b = e.target.closest('[data-j]'); if (b) (b.dataset.j === 'ignite' ? $('#ignite') : tierEls.get(b.dataset.j))?.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' }); });
+$('#jump').addEventListener('click', (e) => { const b = e.target.closest('[data-j]'); if (b) (b.dataset.j === 'ignite' ? $('#ignite') : b.dataset.j === 'cto' ? $('#cto') : tierEls.get(b.dataset.j))?.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' }); });
 $('#track').addEventListener('click', (e) => { const b = e.target.closest('.ti'); if (b) openToken(b.dataset.a); });
 
 function bindDrag(sec) {
@@ -1186,6 +1186,79 @@ function paintIgnite() {
 $('#igBody').addEventListener('click', (e) => { const b = e.target.closest('.igrow'); if (b) openToken(b.dataset.a); });
 setInterval(() => { if (!document.hidden && S.tokens.size) igTick(); }, IG_MS);
 setTimeout(() => { IG.at = 0; igTick(); }, 4000);
+
+// ---------- Community Takeovers ----------
+// Coins the community took over (DexScreener CTO claims), newest claim first, because the earlier a
+// takeover is known the better. Red-flag coins and takeovers that have gone quiet are left off.
+// The page's safety filter and search still apply.
+const CTO_MAX = 12;
+const CT = { log: ctoLoad(), at: 0 };
+function ctoLoad() { try { const o = JSON.parse(localStorage.getItem('hc_cto') || '{}'); const cut = Date.now() - 96 * 3600e3; for (const k in o) if (!(o[k].t0 > cut)) delete o[k]; return o; } catch { return {}; } }
+function ctoList() {
+  const out = [];
+  for (const t of visibleTokens()) {
+    if (!t.ct || !t.p) continue;
+    if (gradeOf(t) === 'red') continue;
+    // Gone quiet: barely trading in the last 5 minutes after the first couple of hours.
+    if (t.ct.m > 120 && (t.v.m5 || 0) < 250 && (t.tx?.m5?.b || 0) < 3) continue;
+    out.push(t);
+  }
+  return out.sort((a, b) => a.ct.m - b.ct.m).slice(0, CTO_MAX);
+}
+const ctoAge = (m) => (m < 60 ? Math.max(1, m) + 'm' : m < 1440 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : Math.floor(m / 1440) + 'd ' + Math.floor((m % 1440) / 60) + 'h');
+function paintCto() {
+  const box = $('#ctoBody');
+  if (!box || !S.tokens.size) return;
+  const list = ctoList();
+  window.__ctoN = list.length;
+  const jb = document.querySelector('#jump .jcto span');
+  if (jb) jb.textContent = list.length;
+  $('#ctoCount').textContent = list.length ? `${list.length} live` : '';
+  let dirty = false;
+  const now = Date.now();
+  for (const t of list) {
+    const L = CT.log[t.a];
+    if (!L) { CT.log[t.a] = { p0: t.p, t0: now, hi: t.p }; dirty = true; }
+    else if (t.p > L.hi) { L.hi = t.p; dirty = true; }
+  }
+  if (dirty) { try { localStorage.setItem('hc_cto', JSON.stringify(CT.log)); } catch {} }
+  if (!list.length) {
+    setHTML(box, `<div class="igempty"><b>No live takeovers right now.</b><span>New community takeovers are checked every 30 seconds and show up here as soon as they're claimed.</span></div>`);
+    return;
+  }
+  setHTML(box, list.map((t, i) => {
+    const c = t.ct, img = safeUrl(t.img), g = gradeOf(t), L = CT.log[t.a];
+    const av = img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="ph">${esc((t.s || '?').slice(0, 2))}</span>`;
+    const fresh = c.m < 60 ? 'fresh' : c.m < 360 ? 'recent' : 'older';
+    const since = L && L.p0 && now - L.t0 > 60e3 ? (t.p / L.p0 - 1) * 100 : null;
+    const rk = S.risk.get(t.a);
+    const h = Math.round(heatOf(t));
+    const chips = [
+      GRADE_TXT[g],
+      t.hold ? `${Math.round(t.hold).toLocaleString()} holders` : '',
+      rk && rk.top10 != null ? `Top 10 hold ${Math.round(rk.top10)}%` : t.top != null ? `Top holders ${Math.round(t.top)}%` : '',
+      t.os != null ? `Organic ${t.os}` : '',
+      t.age ? `Coin age ${fmtAge(t.age)}` : '',
+    ].filter(Boolean);
+    return `<button class="igrow ctorow" data-a="${esc(t.a)}">
+      <span class="igrk">${i + 1}</span>
+      <span class="igav">${av}</span>
+      <span class="igmain">
+        <span class="igl1"><b>${esc(t.s)}</b><span class="ctoage ${fresh}">CTO ${ctoAge(c.m)} ago</span><span class="igmc">${fmtUsd(t.mc)}</span></span>
+        ${c.d ? `<span class="igdesc">${esc(c.d)}</span>` : ''}
+        <span class="igchips">${chips.map((x, k) => `<i${k === 0 ? ` class="g-${g}"` : ''}>${esc(x)}</i>`).join('')}</span>
+      </span>
+      <span class="igside">
+        <span class="igscore"><b>${h}</b><small>heat</small></span>
+        <span class="igmv"><span class="${cls(t.c.m5)}">5m ${fmtMove(t.c.m5)}</span><span class="${cls(t.c.h1)}">1h ${fmtMove(t.c.h1)}</span></span>
+        ${since != null ? `<span class="igsince ${cls(since)}">${fmtPct(since)} since spotted</span>` : ''}
+      </span>
+    </button>`;
+  }).join(''));
+  box.querySelectorAll('img').forEach((im) => im.addEventListener('error', () => im.remove(), { once: true }));
+}
+$('#ctoBody').addEventListener('click', (e) => { const b = e.target.closest('.ctorow'); if (b) openToken(b.dataset.a); });
+setInterval(() => { if (!document.hidden) paintCto(); }, 10000);
 
 // ---------- Boot ----------
 scan();
