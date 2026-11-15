@@ -1016,8 +1016,26 @@ function igSave() { try { localStorage.setItem('hc_ig', JSON.stringify(IG.log));
 const clamp01 = (x) => (x > 1 ? 1 : x > 0 ? x : 0);
 // No market-cap preference above $40K: a confirmed run at any size competes on equal terms.
 const igZone = (mc) => (mc < 25e3 ? 0 : mc < 40e3 ? 0.9 : 1);
-// Concentration limit scales with size (insiders counted): 25% under $100K, 30% at $250K, 35% at $500K+.
-const igConcLim = (mc) => (mc <= 100e3 ? 25 : mc <= 250e3 ? 25 + 5 * (mc - 100e3) / 150e3 : mc <= 500e3 ? 30 + 5 * (mc - 250e3) / 250e3 : 35);
+// Holder limits scale with size: small caps are where insiders can rug, so they're strict; bigger caps
+// get more room. Top 10 wallets (insiders counted): 20% under $100K, 25% at $250K, 30% at $500K,
+// 35% at $1M, 40% at $5M+, sliding between.
+const slide = (mc, pts) => { for (let i = 1; i < pts.length; i++) { const [m0, v0] = pts[i - 1], [m1, v1] = pts[i]; if (mc <= m1) return mc <= m0 ? v0 : v0 + (v1 - v0) * (mc - m0) / (m1 - m0); } return pts[pts.length - 1][1]; };
+const igConcLim = (mc) => slide(mc, [[100e3, 20], [250e3, 25], [500e3, 30], [1e6, 35], [5e6, 40]]);
+// Insiders: under 5% (2 linked wallets) below $250K, 7% (3) up to $1M, 10% (4) above. Dev/creator: 3% below $250K, 5% above.
+const igIns = (mc) => (mc < 250e3 ? { pct: 5, n: 2, dev: 3 } : mc <= 1e6 ? { pct: 7, n: 3, dev: 5 } : { pct: 10, n: 4, dev: 5 });
+// Unloading, at any size: big wallets selling into a crowd of small buys. Over the last hour, more sell
+// dollars than buy dollars while buys outnumber sells, or the average sell is 3x+ the average buy with
+// sellers taking most of the flow, or the price is falling while more people are buying.
+function unloading(t) {
+  const bs = t.bs?.h1, tx = t.tx?.h1;
+  const nb = tx?.b || 0, ns = tx?.s || 0;
+  if ((t.c.h1 ?? 0) <= -5 && nb > ns) return true;
+  if (!bs) return false;
+  const [bv, sv] = bs;
+  if (sv > bv && nb > ns) return true;
+  if (nb > 0 && ns > 0 && sv / ns >= 3 * (bv / nb) && sv >= bv * 0.8) return true;
+  return false;
+}
 const IG_PH = { run: 'Confirmed run', start: 'Run starting', brk: 'Breakout', ext: 'Late in run' };
 
 function igPhase(t, p, r) {
@@ -1045,7 +1063,8 @@ function igPre(t) {
   if (gradeOf(t) !== 'green') return null;
   if (t.f.some((x) => BOT_FLAGS.has(x.k))) return null;
   if (t.ol === 'low') return null;
-  if (t.dev != null && t.dev >= 5) return null;
+  if (t.dev != null && t.dev >= igIns(t.mc).dev) return null;
+  if (unloading(t)) return null;
   if (t.aud && (!t.mintOff || !t.frzOff)) return null;
   if (t.top != null && t.top >= igConcLim(t.mc) + 10) return null;
   if (t.hold != null && t.hold < 150) return null;
@@ -1064,7 +1083,9 @@ function igCheck(t, p) {
   if (!rk || rk.pending) return 'wait';
   if (rk.failed || rk.top10 == null) return 'norisk';
   const lim = igConcLim(t.mc);
-  if (rk.top10 >= lim || (rk.ins || 0) >= 10 || (rk.insN || 0) > 4 || (rk.cre || 0) >= 5) return 'conc';
+  const il = igIns(t.mc);
+  if (rk.top10 >= lim || (rk.ins || 0) >= il.pct || (rk.insN || 0) > il.n || (rk.cre || 0) >= il.dev) return 'conc';
+  if (unloading(t)) return 'dump';
   if (rk.risks?.some((x) => /rugged/i.test(x.n))) return 'rug';
   const curve = t.f.some((x) => x.k === 'curve');
   if (!curve && rk.lp != null && rk.lp < 50) return 'lp';
@@ -1079,7 +1100,7 @@ function igCheck(t, p) {
   if (desc.length < 20 && !(info.website && info.twitter)) return 'desc';
   const conc = clamp01((lim - rk.top10) / 15);
   const spread = 1 - Math.exp(-(info.holders || t.hold || 0) / 500);
-  const insF = 1 - Math.min(rk.ins || 0, 10) / 20;
+  const insF = 1 - Math.min(rk.ins || 0, il.pct) / (il.pct * 2);
   const qual = 0.4 * p.organic + 0.25 * spread + 0.2 * conc + 0.15 * insF;
   // Soft cap so the very best spread out instead of all reading 99.
   const raw = 100 * igMom(p) * (0.55 + 0.45 * qual) * igZone(t.mc) * ph.m;
@@ -1221,6 +1242,7 @@ function ctoBacked(t) {
   if (t.nb?.h1 != null && t.nb.h1 <= 0) return false;
   if (t.hc?.h1 != null && t.hc.h1 < 0) return false;
   if ((t.c.h1 ?? 0) <= -8) return false;
+  if (unloading(t)) return false;
   return true;
 }
 const ctoAge = (m) => (m < 60 ? Math.max(1, m) + 'm' : m < 1440 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : Math.floor(m / 1440) + 'd ' + Math.floor((m % 1440) / 60) + 'h');
