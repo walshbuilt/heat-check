@@ -1199,11 +1199,25 @@ function ctoList() {
   for (const t of visibleTokens()) {
     if (!t.ct || !t.p) continue;
     if (gradeOf(t) === 'red') continue;
-    // Gone quiet: barely trading in the last 5 minutes after the first couple of hours.
-    if (t.ct.m > 120 && (t.v.m5 || 0) < 250 && (t.tx?.m5?.b || 0) < 3) continue;
+    if (!ctoBacked(t)) continue;
     out.push(t);
   }
   return out.sort((a, b) => a.ct.m - b.ct.m).slice(0, CTO_MAX);
+}
+// Real backing, not exit liquidity: enough volume for its size, more dollars buying than selling over
+// the hour, more new buyers than sellers, holders growing, and not bleeding. A takeover where every
+// buy gets sold into (price falling while buys come in) doesn't list.
+function ctoBacked(t) {
+  if (!(t.mc >= 25e3)) return false;
+  if ((t.v.h1 || 0) < Math.max(5000, t.mc * 0.03)) return false;
+  if ((t.v.m5 || 0) < 300) return false;
+  const bs = t.bs?.h1;
+  if (bs) { if (!(bs[0] >= bs[1] * 1.1)) return false; }
+  else if (!((t.tx?.h1?.b || 0) >= (t.tx?.h1?.s || 0) * 1.3)) return false;
+  if (t.nb?.h1 != null && t.nb.h1 <= 0) return false;
+  if (t.hc?.h1 != null && t.hc.h1 < 0) return false;
+  if ((t.c.h1 ?? 0) <= -8) return false;
+  return true;
 }
 const ctoAge = (m) => (m < 60 ? Math.max(1, m) + 'm' : m < 1440 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : Math.floor(m / 1440) + 'd ' + Math.floor((m % 1440) / 60) + 'h');
 function paintCto() {
@@ -1223,7 +1237,7 @@ function paintCto() {
   }
   if (dirty) { try { localStorage.setItem('hc_cto', JSON.stringify(CT.log)); } catch {} }
   if (!list.length) {
-    setHTML(box, `<div class="igempty"><b>No live takeovers right now.</b><span>New community takeovers are checked every 30 seconds and show up here as soon as they're claimed.</span></div>`);
+    setHTML(box, `<div class="igempty"><b>No takeover has real backing right now.</b><span>Takeovers are checked every 30 seconds. One lists only when money is coming in: real volume, more buying than selling, and holders growing.</span></div>`);
     return;
   }
   setHTML(box, list.map((t, i) => {
@@ -1233,8 +1247,11 @@ function paintCto() {
     const since = L && L.p0 && now - L.t0 > 60e3 ? (t.p / L.p0 - 1) * 100 : null;
     const rk = S.risk.get(t.a);
     const h = Math.round(heatOf(t));
+    const bs = t.bs?.h1;
     const chips = [
       GRADE_TXT[g],
+      bs ? `1h buys ${fmtUsd(bs[0])} vs sells ${fmtUsd(bs[1])}` : '',
+      t.nb?.h1 > 0 ? `+${t.nb.h1} net buyers 1h` : '',
       t.hold ? `${Math.round(t.hold).toLocaleString()} holders` : '',
       rk && rk.top10 != null ? `Top 10 hold ${Math.round(rk.top10)}%` : t.top != null ? `Top holders ${Math.round(t.top)}%` : '',
       t.os != null ? `Organic ${t.os}` : '',
