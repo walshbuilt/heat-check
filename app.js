@@ -1080,7 +1080,8 @@ function igCheck(t, p) {
   const info = S.info.get(t.a);
   if (!info || info.pending) return 'wait';
   const desc = String(info.desc || '').trim();
-  if (info.failed || desc.length < 20 || !(info.website || info.twitter)) return 'desc';
+  if (info.failed || !(info.website || info.twitter)) return 'desc';
+  if (desc.length < 20 && !(info.website && info.twitter)) return 'desc';
   const conc = clamp01((lim - rk.top10) / 15);
   const spread = 1 - Math.exp(-(info.holders || t.hold || 0) / 500);
   const insF = 1 - Math.min(rk.ins || 0, 5) / 10;
@@ -1179,7 +1180,7 @@ function paintIgnite() {
       <span class="igav">${av}</span>
       <span class="igmain">
         <span class="igl1"><b>${esc(t.s)}</b><span class="igph ${r.ph.k}">${IG_PH[r.ph.k]}</span><span class="igmc">${fmtUsd(t.mc)}</span></span>
-        <span class="igdesc">${esc(r.desc)}</span>
+        ${r.desc ? `<span class="igdesc">${esc(r.desc)}</span>` : ''}
         <span class="igchips">${chips.map((c) => `<i>${esc(c)}</i>`).join('')}</span>
       </span>
       <span class="igside">
