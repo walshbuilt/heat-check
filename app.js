@@ -1264,6 +1264,8 @@ function keepWhy(t) {
   if (p.dumping) return 'selling took over';
   if (p.bot || p.botChurn) return 'bot trading';
   if (mv15(t) < -8) return 'falling';
+  if ((t.c.m5 || 0) < -20) return 'crashing';
+  if (smallRisk(t)) return smallRisk(t);
   return '';
 }
 // The coin's current move, in plain words: Igniting, Running, Recovering (rebound), or Cooling.
@@ -1279,9 +1281,25 @@ function stageOf(t) {
 // Running now: fills the Top 10 under the Igniting coins. Anything moving up over the last 15 minutes
 // with real volume and no hard rug signal, whatever its safety grade (the grade is shown on the row).
 // Red-flag coins need to be at least a day old.
+// Small, young coins are where rugs live, so Running now holds them to a stricter bar: an hour old,
+// Clean, real liquidity, socials and some community attention. Anything that fails waits for the
+// fully vetted Igniting check instead.
+function smallRisk(t) {
+  if (t.mc >= SMALL_MC) return '';
+  const age = t.age ? Date.now() - t.age : 0;
+  if (age < 60 * 60e3) return 'Under $100K and less than an hour old';
+  if (gradeOf(t) !== 'green') return 'Under $100K and not Clean';
+  if (t.liq && t.liq < t.mc * 0.08) return 'Under $100K with thin liquidity';
+  if (!(t.soc || []).length && !(t.web || []).length) return 'Under $100K with no website or socials';
+  if (buzzOf(t).s < 10) return 'Under $100K with no community attention (Buzz under 10)';
+  return '';
+}
 function runWhy(t) {
   const hb = hardBlock(t);
   if (hb) return hb;
+  const sr = smallRisk(t);
+  if (sr) return sr;
+  if ((t.c.m5 || 0) < -20) return 'Crashing right now';
   const g = gradeOf(t);
   if (g === 'red' && !(t.age && Date.now() - t.age >= 24 * 3600e3)) return 'Red safety flags on a coin less than a day old';
   const p = MH.parts(t, g);
@@ -1387,7 +1405,7 @@ function igTick() {
     const on = IG.fillSince.has(t.a);
     if (on ? keepWhy(t) : runWhy(t)) continue;
     const held = on ? now - IG.fillSince.get(t.a) : 0;
-    cand.push([t, runScore(t) * (on ? 1.3 : 1) + (on && held < 180e3 ? 1000 : 0)]);
+    cand.push([t, runScore(t) * (on ? 1.3 : 1) + (on && held < 180e3 ? 1000 : 0)]); // keepWhy above already dropped any coin that's crashing
   }
   cand.sort((x, y) => y[1] - x[1]);
   IG.fill = [];
