@@ -1164,6 +1164,21 @@ function hardBlock(t) {
   if (t.f.some((x) => BOT_FLAGS.has(x.k))) return 'Bot or wash-trading signals';
   if (S.risk.get(t.a)?.risks?.some((x) => /rugged/i.test(x.n))) return 'Marked as rugged';
   if (unloading(t)) return 'Big wallets are selling into the buys';
+  // Serial launchers, insider networks and bots. Some of each is in almost every coin, so these
+  // block only at levels that mean a setup. Established community coins (a week+ old, 1,000+
+  // holders, $250K+) are exempt: by then the community, not the dev, decides the price.
+  if (igCommunity(t)) return '';
+  const rk = S.risk.get(t.a), ok = rk && !rk.pending && !rk.failed;
+  const devN = Math.max(t.devM || 0, (ok && rk.devN) || 0);
+  if (devN >= 20) return `Serial launcher: dev has made ${devN} coins`;
+  if (devN >= 5 && t.mc < 500e3) return `Dev has made ${devN} coins (serial launcher)`;
+  if (t.ol === 'low') return 'Mostly bot trading';
+  if (t.os != null && t.os < 40 && t.mc < 1e6) return `Organic score ${t.os}: mostly bots`;
+  if (ok) {
+    if ((rk.graph || 0) >= 25 && t.mc < 1e6) return `${rk.graph} linked insider wallets`;
+    if ((rk.ins || 0) >= 15 && t.mc < 500e3) return `Insiders hold ${Math.round(rk.ins)}%`;
+    if ((rk.insN || 0) >= 8 && t.mc < 250e3) return `${rk.insN} insider wallets in the top holders`;
+  }
   return '';
 }
 function igPre(t, out = {}) {
@@ -1284,6 +1299,7 @@ function stageOf(t) {
 // Small, young coins are where rugs live, so Running now holds them to a stricter bar: an hour old,
 // Clean, real liquidity, socials and some community attention. Anything that fails waits for the
 // fully vetted Igniting check instead.
+const WAIT_RISK = 'Checking dev history and insider wallets';
 function smallRisk(t) {
   if (t.mc >= SMALL_MC) return '';
   const age = t.age ? Date.now() - t.age : 0;
@@ -1299,6 +1315,8 @@ function runWhy(t) {
   if (hb) return hb;
   const sr = smallRisk(t);
   if (sr) return sr;
+  const rk = S.risk.get(t.a);
+  if (t.mc < 500e3 && !igCommunity(t) && (!rk || rk.pending || rk.failed)) return WAIT_RISK;
   if ((t.c.m5 || 0) < -20) return 'Crashing right now';
   const g = gradeOf(t);
   if (g === 'red' && !(t.age && Date.now() - t.age >= 24 * 3600e3)) return 'Red safety flags on a coin less than a day old';
@@ -1399,11 +1417,13 @@ function igTick() {
   // (it gets a 30% edge over newcomers, and holds at least 3 minutes), so the ten shift around
   // instead of turning over every refresh.
   const have = new Set(IG.listed.map((x) => x[0].a));
-  const cand = [];
+  const cand = [], waitRisk = [];
   for (const t of S.tokens.values()) {
     if (have.has(t.a)) continue;
     const on = IG.fillSince.has(t.a);
-    if (on ? keepWhy(t) : runWhy(t)) continue;
+    const why = on ? keepWhy(t) : runWhy(t);
+    if (why === WAIT_RISK) { waitRisk.push(t); continue; }
+    if (why) continue;
     const held = on ? now - IG.fillSince.get(t.a) : 0;
     cand.push([t, runScore(t) * (on ? 1.3 : 1) + (on && held < 180e3 ? 1000 : 0)]); // keepWhy above already dropped any coin that's crashing
   }
@@ -1420,6 +1440,10 @@ function igTick() {
   for (const a of [...IG.fillSince.keys()]) if (!keepSet.has(a)) IG.fillSince.delete(a);
   for (const t of IG.fill) if (!IG.fillSince.has(t.a)) IG.fillSince.set(t.a, now);
   fillFetch(IG.fill);
+  // Fetch safety reports for the best coins still waiting on one, so they can qualify next refresh.
+  waitRisk.sort((x, y) => runScore(y) - runScore(x));
+  for (const t of waitRisk.slice(0, 6)) if (!S.risk.has(t.a) && !riskQ.includes(t.a)) riskQ.push(t.a);
+  pumpRisk();
   window.__igN = IG.listed.length + IG.fill.length;
   let dirty = false;
   for (const [t, sn] of IG.listed) {
