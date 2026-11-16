@@ -751,7 +751,7 @@ addEventListener('keydown', (e) => {
 async function refreshToken() {
   const a = openMint; if (!a || document.hidden) return;
   try {
-    const d = await api('/api/token?a=' + a);
+    const d = await api('/api/prices?one=1&a=' + a);
     if (a !== openMint) return;
     S.tokens.set(a, keep(d.token));
     const ath = S.ath.get(a);
