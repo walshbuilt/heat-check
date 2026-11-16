@@ -470,3 +470,11 @@ body.coin-open .track,body.coin-open .tier *{animation-play-state:paused!importa
 /* Keep the coin page header clear of the iPhone clock/status bar (taps there scroll to top instead) */
 .shead,.dhead{padding-top:calc(env(safe-area-inset-top, 0px) + 14px)}
 .backfab{width:58px;height:58px}
+/* Missed runners log under the Top 10 */
+.igmiss{padding:8px 14px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.igmiss[hidden]{display:none}
+.igmiss summary{cursor:pointer;padding:4px 0;list-style:none}
+.igmiss summary::-webkit-details-marker{display:none}
+.igmiss summary b{color:#ffb86b;font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-right:6px}
+.missrow{display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;text-align:left;padding:8px 0;border-top:1px solid var(--line);color:var(--text);background:none}
+.missrow small{color:var(--dim);font-size:11px;line-height:1.35}

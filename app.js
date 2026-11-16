@@ -1088,7 +1088,13 @@ function buzzOf(t) {
   const so = t.so || {}, fresh = (m) => (m != null && m <= 180 ? 1 - m / 240 : 0);
   const calls = Math.min(1, 0.6 * fresh(so.tg) + 0.5 * fresh(so.c) + 0.25 * fresh(so.p) + 0.15 * fresh(so.b));
   const tg = sat(info?.tgMembers || 0, 1500);
-  const s = Math.round(100 * (0.3 * ct + 0.25 * hold + 0.2 * trad + 0.15 * calls + 0.1 * tg));
+  // Jupiter has no X (CT) data for many coins, especially ones launched off pump.fun, and many have
+  // no Telegram. A missing source is left out of the average instead of counting as zero attention.
+  const parts = [[0.25, hold], [0.2, trad], [0.15, calls]];
+  if (t.ctl != null || t.sctl != null) parts.push([0.3, ct]);
+  if (info?.tgMembers != null) parts.push([0.1, tg]);
+  const wsum = parts.reduce((a, x) => a + x[0], 0);
+  const s = Math.round(100 * parts.reduce((a, x) => a + x[0] * x[1], 0) / wsum);
   const why = [];
   if (t.sctl) why.push(`${t.sctl} smart CT likes`);
   if (t.ctl) why.push(`${t.ctl} CT likes`);
@@ -1285,7 +1291,11 @@ function runScore(t) {
   const safe = g === 'green' ? (isOrganic(t) ? 1.12 : 1) : g === 'amber' ? 0.85 : 0.6;
   const com = igCommunity(t) ? 1.1 : 1;
   const size = t.mc < SMALL_MC ? 0.8 : 1;
-  return (0.55 * h + 0.45 * gain) * safe * com * size * (0.8 + 0.2 * (1 - Math.exp(-hold / 1500)));
+  // Early in a run: most of the 6-hour move happened this hour, holders are growing, no red flags.
+  // These are the ones to catch first, so they rank above coins deep into an older run.
+  const h1 = t.c.h1 || 0, h6 = t.c.h6 ?? h1;
+  const early = h1 >= 15 && h6 <= h1 * 1.6 + 10 && g !== 'red' && (t.hc?.h1 || 0) > 0 ? 1.2 : 1;
+  return (0.55 * h + 0.45 * gain) * safe * com * size * early * (0.8 + 0.2 * (1 - Math.exp(-hold / 1500)));
 }
 // A coin already on the board stays unless something serious changes: a hard rug signal, it stops
 // trading, selling takes over, or bot trading.
@@ -1490,15 +1500,71 @@ function igTick() {
     if (t && t.p && now - L.t0 < IG_WIN_MS && t.p > (L.hi4 || 0)) { L.hi4 = t.p; dirty = true; }
   }
   if (dirty) igSave();
+  missTrack(now);
   paintIgnite();
 }
+// ---------- Miss log ----------
+// Every coin that doubles (or more) from where this page first saw it, without the Top 10 listing it
+// first, is logged with the reasons it was held off along the way. Late calls (listed only after a
+// 60%+ move) are logged too. Kept 48 hours on this device.
+const MISS = { seen: new Map(), log: missLoad() };
+function missLoad() { try { const o = JSON.parse(localStorage.getItem('hc_miss') || '[]'); const cut = Date.now() - 48 * 3600e3; return Array.isArray(o) ? o.filter((x) => x && x.t > cut) : []; } catch { return []; } }
+function missSave() { try { localStorage.setItem('hc_miss', JSON.stringify(MISS.log.slice(-40))); } catch {} }
+function missTrack(now) {
+  const on = new Set([...IG.listed.map((x) => x[0].a), ...IG.fill.map((t) => t.a)]);
+  for (const t of S.tokens.values()) {
+    if (!(t.mc >= 25e3) || !t.p) continue;
+    let m = MISS.seen.get(t.a);
+    if (!m || now - m.t0 > 24 * 3600e3) { m = { t0: now, mc0: t.mc, p0: t.p, why: {}, done: false }; MISS.seen.set(t.a, m); }
+    if (m.done) continue;
+    const x = t.p / m.p0;
+    if (on.has(t.a)) {
+      // Listed. Only worth logging if the move was already well underway.
+      if (x >= 1.6) missAdd(t, m, now, 'late');
+      m.done = true;
+      continue;
+    }
+    // Only coins that are moving need a reason (keeps this cheap across hundreds of coins).
+    if ((t.c.h1 || 0) >= 8 || (chg15(t) || 0) >= 3 || x >= 1.2) {
+      const r = runWhy(t) || 'Qualified, but ten other coins ranked higher';
+      m.why[r] = (m.why[r] || 0) + 1;
+    }
+    if (x >= 2) { missAdd(t, m, now, 'miss'); m.done = true; }
+  }
+  if (MISS.seen.size > 4000) for (const [k, v] of MISS.seen) if (now - v.t0 > 24 * 3600e3 || !S.tokens.has(k)) MISS.seen.delete(k);
+}
+function missAdd(t, m, now, kind) {
+  const why = Object.entries(m.why).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w, n]) => ({ w, n }));
+  MISS.log = MISS.log.filter((x) => x.a !== t.a);
+  MISS.log.push({ a: t.a, s: t.s, kind, mc0: m.mc0, mc: t.mc, t0: m.t0, t: now, why });
+  missSave();
+  console.log('[HeatCheck miss]', kind, t.s, t.a, Math.round(m.mc0), '->', Math.round(t.mc), why);
+}
+window.HCMiss = MISS;
+function paintMiss() {
+  const box = $('#igMiss');
+  if (!box) return;
+  const list = MISS.log.slice().sort((a, b) => b.t - a.t).slice(0, 12);
+  box.hidden = !list.length;
+  if (!list.length) return;
+  const ago = (ms) => ctoAge(Math.round((Date.now() - ms) / 60e3));
+  const html = `<summary><b>Missed runners</b> ${list.length} on this device, last 48h</summary>` + list.map((x) => {
+    const live = S.tokens.get(x.a), now = live ? live.mc : x.mc;
+    const head = x.kind === 'late' ? `listed late, ${fmtUsd(x.mc0)} → ${fmtUsd(x.mc)} before it made the board` : `${fmtUsd(x.mc0)} → ${fmtUsd(x.mc)} and never listed`;
+    const why = x.why.length ? x.why.map((r) => `${esc(r.w)}${r.n > 1 ? ` (×${r.n})` : ''}`).join(' · ') : 'Not tracked while it moved (the page wasn\'t open, or it wasn\'t found yet)';
+    return `<button class="missrow" data-a="${esc(x.a)}"><span><b>${esc(x.s)}</b> ${esc(head)} · now ${fmtUsd(now)} · ${ago(x.t)} ago</span><small>Held off by: ${why}</small></button>`;
+  }).join('');
+  if (box._h !== html) { box._h = html; const open = box.open; box.innerHTML = html; box.open = open; }
+}
+$('#igMiss')?.addEventListener('click', (e) => { const b = e.target.closest('.missrow'); if (b) openToken(b.dataset.a); });
 function paintIgnite() {
   const box = $('#igBody');
   if (!box) return;
   const total = IG.listed.length + IG.fill.length;
   $('#igCount').textContent = `${total} of 10` + (total ? ` · ${IG.listed.length} igniting` : '');
   const rec = igRecord(), recEl = $('#igRecord');
-  if (recEl) recEl.textContent = rec.done || rec.open ? 'Calls seen on this device, last 48h: ' + (rec.done ? `${rec.wins} of ${rec.done} finished calls hit target` : 'none finished yet') + (rec.open ? ` · ${rec.open} still in their 4-hour window` : '') + '.' : '';
+  paintMiss();
+  if (recEl) recEl.textContent = rec.done || rec.open ?'Calls seen on this device, last 48h: ' + (rec.done ? `${rec.wins} of ${rec.done} finished calls hit target` : 'none finished yet') + (rec.open ? ` · ${rec.open} still in their 4-hour window` : '') + '.' : '';
   if (!total) {
     setHTML(box, `<div class="igempty"><b>Nothing is running right now.</b><span>Watching ${IG.scanned} coins.</span></div>`);
     return;
