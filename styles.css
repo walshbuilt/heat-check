@@ -466,3 +466,7 @@ body.coin-open .track,body.coin-open .tier *{animation-play-state:paused!importa
 .backfab svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
 .backfab:active{background:rgba(255,122,48,.35)}
 #chart{touch-action:pan-y}
+
+/* Keep the coin page header clear of the iPhone clock/status bar (taps there scroll to top instead) */
+.shead,.dhead{padding-top:calc(env(safe-area-inset-top, 0px) + 14px)}
+.backfab{width:58px;height:58px}

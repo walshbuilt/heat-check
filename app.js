@@ -647,12 +647,29 @@ document.addEventListener('click', (e) => {
 
 // ---------- Routing ----------
 let navDepth = 0;
-// Close the screen right away, then tidy the browser history. Never wait on history to close it.
+// Back always lands on the main screen: close the coin page and any tier list right away, then
+// rewind the browser history to where the visitor started, so iPhone's swipe-back can't reopen a coin.
+let goingHome = false;
 function goBack() {
-  if (openMint) hideToken(); else if (S.openTier) hideTier();
-  if (navDepth > 0) { history.back(); return; }
-  setHash(S.openTier, null, false);
-  route();
+  const was = location.hash;
+  setFull(false);
+  if (openMint) hideToken();
+  if (S.openTier) hideTier();
+  const n = navDepth; navDepth = 0;
+  if (n > 0) { goingHome = true; history.go(-n); setTimeout(() => { goingHome = false; if (location.hash) { history.replaceState(null, '', location.pathname); } route(); }, 400); }
+  else { history.replaceState(null, '', location.pathname); route(); }
+  report('back', was);
+}
+// One quiet line in the server log per Back tap, so a Back that doesn't work on someone's phone shows up.
+function report(kind, extra) { try { navigator.sendBeacon('/api/prices', JSON.stringify({ kind, extra: String(extra || '').slice(0, 120), url: location.hash, ua: navigator.userAgent, w: innerWidth, trail: [] })); } catch {} }
+// iPhone sometimes swallows "click" on fixed buttons over a scrolling page, so Back answers the
+// finger lifting (touchend / pointerup) and ignores the click that follows.
+function onTap(el, fn) {
+  let last = 0;
+  const go = (e) => { const now = Date.now(); if (now - last < 600) { e.preventDefault(); return; } last = now; e.preventDefault(); e.stopPropagation(); fn(); };
+  el.addEventListener('touchend', go, { passive: false });
+  el.addEventListener('pointerup', (e) => { if (e.pointerType !== 'touch') go(e); });
+  el.addEventListener('click', (e) => { e.preventDefault(); if (Date.now() - last > 600) go(e); });
 }
 function setHash(tier, mint, push) {
   if (push) navDepth++;
@@ -669,9 +686,9 @@ function route() {
   tier ? showTier(tier) : hideTier();
   mint ? showToken(mint) : hideToken();
 }
-addEventListener('popstate', () => { navDepth = Math.max(0, navDepth - 1); route(); });
+addEventListener('popstate', () => { if (!goingHome) navDepth = Math.max(0, navDepth - 1); route(); });
 const scrimSync = () => { const on = !!(S.openTier || openMint); $('#scrim').classList.toggle('on', on); $('#backFab').classList.toggle('on', on); };
-$('#backFab').onclick = (e) => { e.preventDefault(); e.stopPropagation(); goBack(); };
+onTap($('#backFab'), goBack);
 $('#scrim').onclick = () => goBack();
 
 function openTier(id) { setHash(id, null, true); route(); }
@@ -694,7 +711,7 @@ function hideTier() {
   if (!openMint) document.body.style.overflow = '';
   scrimSync(); render();
 }
-$('#closeSheet').onclick = () => goBack();
+onTap($('#closeSheet'), goBack);
 
 // ---------- Coin page ----------
 let openMint = null, tokenTimer = null, candleTimer = null;
@@ -740,7 +757,7 @@ function hideToken() {
   if (!S.openTier) document.body.style.overflow = '';
   scrimSync();
 }
-$('#closeDrawer').onclick = () => goBack();
+onTap($('#closeDrawer'), goBack);
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!$('#modal').hidden) $('#modal').hidden = true;
