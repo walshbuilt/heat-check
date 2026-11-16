@@ -452,3 +452,17 @@ body.coin-open .track,body.coin-open .tier *{animation-play-state:paused!importa
 .runrow .igscore b{font-size:26px;background:linear-gradient(180deg,#ffd166,#ff6a14);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .igign{font-size:11px;color:var(--muted)}
 .igdiv.first{border-top:0;margin-top:0}
+
+/* Contract address bar at the top of the coin page: tap to copy */
+.cabar{display:flex;align-items:center;gap:10px;width:100%;margin-bottom:10px;padding:10px 12px;border-radius:12px;border:1.5px solid rgba(255,209,102,.5);background:color-mix(in srgb,#ffd166 10%,var(--panel));color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.cabar .calbl{font-size:11px;font-weight:800;letter-spacing:.08em;color:#ffd166;flex:none}
+.cabar code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.cabar .cacopy{flex:none;font-size:12px;font-weight:800;color:#1a0f05;background:#ffd166;padding:5px 10px;border-radius:999px}
+.cabar:active{transform:scale(.99)}
+
+/* Big back button fixed to the middle of the left edge */
+.backfab{position:fixed;left:max(8px,env(safe-area-inset-left));top:50%;transform:translateY(-50%);z-index:100;width:52px;height:52px;border-radius:50%;display:none;place-items:center;border:1.5px solid rgba(255,122,48,.7);background:rgba(16,20,27,.92);box-shadow:0 6px 24px rgba(0,0,0,.55);color:#fff;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.backfab.on{display:grid}
+.backfab svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.backfab:active{background:rgba(255,122,48,.35)}
+#chart{touch-action:pan-y}

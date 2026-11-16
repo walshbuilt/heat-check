@@ -647,9 +647,11 @@ document.addEventListener('click', (e) => {
 
 // ---------- Routing ----------
 let navDepth = 0;
+// Close the screen right away, then tidy the browser history. Never wait on history to close it.
 function goBack() {
+  if (openMint) hideToken(); else if (S.openTier) hideTier();
   if (navDepth > 0) { history.back(); return; }
-  if (openMint) setHash(S.openTier, null, false); else setHash(null, null, false);
+  setHash(S.openTier, null, false);
   route();
 }
 function setHash(tier, mint, push) {
@@ -668,7 +670,8 @@ function route() {
   mint ? showToken(mint) : hideToken();
 }
 addEventListener('popstate', () => { navDepth = Math.max(0, navDepth - 1); route(); });
-const scrimSync = () => $('#scrim').classList.toggle('on', !!(S.openTier || openMint));
+const scrimSync = () => { const on = !!(S.openTier || openMint); $('#scrim').classList.toggle('on', on); $('#backFab').classList.toggle('on', on); };
+$('#backFab').onclick = (e) => { e.preventDefault(); e.stopPropagation(); goBack(); };
 $('#scrim').onclick = () => goBack();
 
 function openTier(id) { setHash(id, null, true); route(); }
@@ -709,6 +712,7 @@ function showToken(a) {
   candles = []; lastCandle = null; chartFor = null; chartPool = null;
   if (!tfManual) { S.tf = autoTf(S.tokens.get(a)); paintTf(); }
   if (cS) { cS.setData([]); vS.setData([]); setAthLine(); }
+  $('#dCa').dataset.copy = a; $('#dCaTxt').textContent = a;
   paintDrawer(); loadChart();
   clearInterval(tokenTimer); tokenTimer = setInterval(refreshToken, TOKEN_MS); refreshToken();
   clearInterval(candleTimer); candleTimer = setInterval(refreshCandles, CANDLE_MS);
@@ -795,6 +799,7 @@ function paintDrawer() {
   $('#dImg').hidden = !img; if (img && $('#dImg').src !== img) $('#dImg').src = img;
   $('#dDot').className = 'fdot g-' + g;
   $('#dSym').textContent = t.s;
+  const ca = $('#dCa'); if (ca.dataset.copy !== t.a) { ca.dataset.copy = t.a; $('#dCaTxt').textContent = t.a; }
   $('#dName').textContent = t.nm;
   const pe = $('#dPrice'), me = $('#dMc');
   pe.textContent = fmtPrice(t.p); flash(pe, dPrev.p, t.p);
@@ -932,6 +937,10 @@ function ensureChart() {
     rightPriceScale: { borderColor: '#1f2632', scaleMargins: { top: 0.14, bottom: 0.26 }, autoScale: true },
     timeScale: { borderColor: '#1f2632', timeVisible: true, secondsVisible: false, rightOffset: 4, barSpacing: 8, fixLeftEdge: false },
     crosshair: { mode: LC.CrosshairMode.Normal },
+    // On phones a vertical swipe over the chart must scroll the page, not grab the chart (that felt frozen).
+    handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+    handleScale: { axisPressedMouseMove: { time: true, price: false }, mouseWheel: true, pinch: true },
+    kineticScroll: { touch: false, mouse: false },
     localization: { priceFormatter: fmtAxis },
   });
   cS = chart.addCandlestickSeries({ upColor: C.up, downColor: C.down, borderUpColor: C.up, borderDownColor: C.down, wickUpColor: C.up, wickDownColor: C.down, priceFormat: { type: 'custom', minMove: 1e-12, formatter: fmtAxis } });
