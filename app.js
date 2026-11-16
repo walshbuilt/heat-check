@@ -1205,7 +1205,7 @@ function igPre(t, out = {}) {
   if (ageH > 2 && t.os != null && t.os < 55) return no(`Organic score ${t.os} is under 55`);
   return p;
 }
-const IG_WHY = { wait: 'Still loading its safety report and price history', norisk: 'No safety report available', conc: 'Holders too concentrated or too many insider wallets for its size and age', dump: 'Big wallets are selling into the buys', rug: 'Marked as rugged', lp: 'Liquidity isn\'t locked', phase: 'Moving, but not at the start of a run (or no fresh breakout)', desc: 'No website or X account', buzz: 'Not enough community attention yet (Buzz under 20)' };
+const IG_WHY = { wait: 'Still loading its safety report and price history', norisk: 'No safety report available', conc: 'Holders too concentrated or too many insider wallets for its size and age', dump: 'Big wallets are selling into the buys', rug: 'Marked as rugged', lp: 'Liquidity isn\'t locked', phase: 'Moving, but not at the start of a run (or no fresh breakout)', desc: 'No website or X account', buzz: 'Not enough community attention yet (Buzz under 20)', young: 'Under an hour old: needs to be fully clean (no insiders, no bots, not a repeat dev) with a working product or real attention, and at least 30 minutes old' };
 // A working product: the coin's site is live and links an app, docs or code (not a template or "coming soon").
 function productOf(t) {
   const u = MA.siteUrl(t, S.info.get(t.a)), s = u ? S.site.get(u) : null;
@@ -1233,6 +1233,7 @@ function igCheck(t, p) {
   if (unloading(t)) return 'dump';
   if (!com && (rk.graph || 0) >= 25) return 'conc';
   if (rk.risks?.some((x) => /rugged/i.test(x.n))) return 'rug';
+  if (youngRisk(t)) return 'young';
   const curve = t.f.some((x) => x.k === 'curve');
   if (!curve && rk.lp != null && rk.lp < 50) return 'lp';
   const run = IG.run.get(t.a);
@@ -1300,10 +1301,24 @@ function stageOf(t) {
 // Clean, real liquidity, socials and some community attention. Anything that fails waits for the
 // fully vetted Igniting check instead.
 const WAIT_RISK = 'Checking dev history and insider wallets';
-function smallRisk(t) {
-  if (t.mc >= SMALL_MC) return '';
+// Any coin under an hour old, at any size, in any part of the Top 10. Under 30 minutes: never.
+// 30 to 60 minutes: only if truly clean (Organic: no insiders, no bots, dev holds little, LP locked),
+// no linked-wallet network, the dev isn't a repeat launcher, and it has a working product or real attention.
+function youngRisk(t) {
   const age = t.age ? Date.now() - t.age : 0;
-  if (age < 60 * 60e3) return 'Under $100K and less than an hour old';
+  if (age >= 60 * 60e3) return '';
+  if (age < 30 * 60e3) return 'Less than 30 minutes old';
+  const rk = S.risk.get(t.a);
+  if (!rk || rk.pending || rk.failed) return WAIT_RISK;
+  const devN = Math.max(t.devM || 0, rk.devN || 0);
+  if (!isOrganic(t) || (rk.graph || 0) > 0 || devN >= 2) return 'Under an hour old and not fully clean (insiders, bots or a repeat dev)';
+  if (!productOf(t) && buzzOf(t).s < BUZZ_MIN) return 'Under an hour old with no working product or real attention yet';
+  return '';
+}
+function smallRisk(t) {
+  const yr = youngRisk(t);
+  if (yr) return yr;
+  if (t.mc >= SMALL_MC) return '';
   if (gradeOf(t) !== 'green') return 'Under $100K and not Clean';
   if (t.liq && t.liq < t.mc * 0.08) return 'Under $100K with thin liquidity';
   if (!(t.soc || []).length && !(t.web || []).length) return 'Under $100K with no website or socials';
