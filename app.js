@@ -26,7 +26,12 @@ const TIERS = [
 const TMAP = Object.fromEntries(TIERS.map((t) => [t.id, t]));
 const WIN_LABEL = { m5: '5m', h1: '1h', h6: '6h', h24: '24h' };
 const RANK_MS = 12000, IG_MS = 15000;
-const SCAN_MS = 12000, PRICE_MS = 3000, TOKEN_MS = 2000, CANDLE_MS = 15000;
+// Polling rates. Every request is a paid server call, so these are kept as slow as the board can stand,
+// and all polling stops when the tab is hidden or nobody has touched the page for IDLE_MS.
+const SCAN_MS = 15000, PRICE_MS = 8000, TOKEN_MS = 4000, CANDLE_MS = 20000;
+const IDLE_MS = 10 * 60e3;
+let lastActive = Date.now();
+const idle = () => Date.now() - lastActive > IDLE_MS;
 const CARD_ROWS = 5, SHEET_ROWS = 500;
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const CLOCK = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
@@ -235,7 +240,7 @@ function chg15(t) {
 const mv15 = (t) => { const c = chg15(t); if (c != null) return c; const m5 = t.c.m5 || 0, h1 = t.c.h1 || 0; return m5 + Math.max(-m5, Math.min(h1 - m5, 60)) * (10 / 55); };
 let scanBusy = false;
 async function scan() {
-  if (scanBusy || document.hidden) return;
+  if (scanBusy || document.hidden || idle()) return;
   scanBusy = true;
   try {
     const d = await api('/api/scan');
@@ -251,7 +256,7 @@ async function scan() {
 }
 let priceBusy = false;
 async function tickPrices() {
-  if (priceBusy || document.hidden || !S.lastScan || (openMint && !S.openTier)) return;
+  if (priceBusy || document.hidden || idle() || !S.lastScan || (openMint && !S.openTier)) return;
   const addrs = [...new Set([...rowEls.keys()].map((k) => k.split('|')[1]))].filter((a) => a !== openMint).sort();
   if (!addrs.length) return;
   priceBusy = true;
@@ -272,6 +277,7 @@ function setStatus(st) {
 }
 setInterval(() => {
   if (!S.lastScan || $('#status').classList.contains('err')) return;
+  if (idle()) { $('#status').classList.remove('live'); $('#statusText').textContent = 'Paused · tap to resume'; return; }
   const s = Math.round((Date.now() - S.lastScan) / 1000);
   $('#statusText').innerHTML = `Live<span class="cnt"> · ${S.tokens.size} coins</span> · ${s < 2 ? 'now' : s + 's'}`;
 }, 1000);
@@ -766,7 +772,7 @@ addEventListener('keydown', (e) => {
 });
 
 async function refreshToken() {
-  const a = openMint; if (!a || document.hidden) return;
+  const a = openMint; if (!a || document.hidden || idle()) return;
   try {
     const d = await api('/api/prices?one=1&a=' + a);
     if (a !== openMint) return;
@@ -1035,7 +1041,7 @@ async function loadMore() {
   } catch { noMore = true; } finally { loadingMore = false; }
 }
 async function refreshCandles() {
-  if (!openMint || document.hidden || !chartPool || !candles.length) return;
+  if (!openMint || document.hidden || idle() || !chartPool || !candles.length) return;
   const my = chartToken;
   try {
     const d = await api(`/api/ohlcv?pool=${chartPool}&a=${openMint}&tf=${S.tf}&limit=10`);
@@ -1690,6 +1696,13 @@ scan();
 setInterval(scan, SCAN_MS);
 setInterval(tickPrices, PRICE_MS);
 setInterval(() => { if (!document.hidden) rowEls.forEach((el, k) => { const t = S.tokens.get(k.split('|')[1]); if (t) { const age = el.querySelector('.age'); const at = fmtAge(t.age); if (age._t !== at) { age.innerHTML = CLOCK + at; age._t = at; age.className = 'age ' + ageCls(t.age); } } }); }, 30000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { scan(); if (openMint) refreshToken(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { lastActive = Date.now(); scan(); if (openMint) refreshToken(); } });
+// Any touch, click, key or scroll counts as activity; coming back from idle refreshes right away.
+const wake = () => {
+  const was = idle();
+  lastActive = Date.now();
+  if (was) { $('#status').classList.add('live'); scan(); if (openMint) refreshToken(); }
+};
+['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach((ev) => addEventListener(ev, wake, { passive: true, capture: true }));
 if (location.hash) route();
 })();

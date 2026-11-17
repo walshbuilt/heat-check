@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     for (let i = 0; i < list.length; i += 30) chunks.push(list.slice(i, i + 30));
     const results = await settle(chunks.map((c) => getJSON(`${DS}/tokens/v1/solana/${c.join(',')}`, { timeout: 5000 })));
     const tokens = await withJupiter(rowsFrom(results, new Set(list)));
-    send(res, 200, { t: Date.now(), tokens }, 's-maxage=2, stale-while-revalidate=2');
+    send(res, 200, { t: Date.now(), tokens }, 's-maxage=5, stale-while-revalidate=5');
   } catch (e) {
     send(res, 502, { error: String(e.message || e) }, 'no-store');
   }
@@ -33,7 +33,7 @@ async function oneToken(req, res) {
     if (!row) return send(res, 404, { error: 'not found' }, 's-maxage=5');
     row.g = grade(row.f);
     await withJupiter([row]);
-    send(res, 200, { t: Date.now(), token: row }, 's-maxage=2, stale-while-revalidate=5');
+    send(res, 200, { t: Date.now(), token: row }, 's-maxage=3, stale-while-revalidate=5');
   } catch (e) {
     send(res, 502, { error: String(e.message || e) }, 'no-store');
   }
